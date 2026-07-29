@@ -14,8 +14,7 @@ targets:
     platform: macOS
     sources:
       - path: L16Studio/Sources
-    resources:
-      - path: L16Studio/Resources
+      - path: L16Studio/Resources/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.sunkencity.L16Studio
@@ -26,6 +25,7 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: L16Studio/Info.plist
       properties:
