@@ -5,36 +5,21 @@ import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 
-func writeDNGAndRender(image: RawImage, samples: [UInt16], blackLevel: Float?, orientation: Orientation, baseURL: URL) {
+func exportAndRender(image: RawImage, file: LRIFile, baseURL: URL) {
     do {
-        let dngData = try DNGWriter.write(image: image, samples: samples, blackLevel: blackLevel, orientation: orientation)
         let dngURL = baseURL.deletingPathExtension().appendingPathExtension("dng")
-        try dngData.write(to: dngURL)
-        print("      wrote DNG: \(dngURL.path) (\(dngData.count) bytes)")
+        try ImageRenderer.exportDNG(image, from: file, to: dngURL)
+        print("      wrote DNG: \(dngURL.path)")
 
-        guard let filter = CIRAWFilter(imageData: dngData, identifierHint: nil) else {
-            print("      CIRAWFilter rejected the DNG")
-            return
-        }
-        guard let outputImage = filter.outputImage else {
-            print("      CIRAWFilter produced no output image")
-            return
-        }
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
-            print("      failed to render CIRAWFilter output")
-            return
-        }
-        let pngURL = baseURL.deletingPathExtension().appendingPathExtension("rendered.png")
-        guard let dest = CGImageDestinationCreateWithURL(pngURL as CFURL, UTType.png.identifier as CFString, 1, nil) else {
-            print("      failed to create PNG destination for rendered output")
-            return
-        }
-        CGImageDestinationAddImage(dest, cgImage, nil)
-        CGImageDestinationFinalize(dest)
-        print("      wrote CIRAWFilter-rendered PNG: \(pngURL.path) (\(cgImage.width)x\(cgImage.height))")
+        let jpegURL = baseURL.deletingPathExtension().appendingPathExtension("rendered.jpg")
+        try ImageRenderer.exportJPEG(image, from: file, to: jpegURL)
+        print("      wrote rendered JPEG: \(jpegURL.path)")
+
+        let heicURL = baseURL.deletingPathExtension().appendingPathExtension("rendered.heic")
+        try ImageRenderer.exportHEIC(image, from: file, to: heicURL)
+        print("      wrote rendered HEIC: \(heicURL.path)")
     } catch {
-        print("      DNG pipeline error: \(error)")
+        print("      export error: \(error)")
     }
 }
 
@@ -132,10 +117,9 @@ for path in arguments.dropFirst() {
                     writeGrayscalePNG(samples: preview.samples, width: preview.width, height: preview.height, maxValue: 1023, to: outURL)
 
                     if image.cfaPattern != nil {
-                        let dngBaseURL = url.deletingLastPathComponent()
+                        let exportBaseURL = url.deletingLastPathComponent()
                             .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_\(image.camera)")
-                        let blackLevel = file.metadata.sensorData.first(where: { $0.sensorType == .ar1335 })?.characterization.blackLevel
-                        writeDNGAndRender(image: image, samples: samples, blackLevel: blackLevel, orientation: file.metadata.orientation ?? .normal, baseURL: dngBaseURL)
+                        exportAndRender(image: image, file: file, baseURL: exportBaseURL)
                     }
                 }
             } else if case .bayerJpeg = image.data {
