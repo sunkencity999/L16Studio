@@ -34,7 +34,13 @@ public enum ImageRenderer {
 
     /// Unpacks, builds a DNG, and renders it via `CIRAWFilter`. This is the
     /// one call the app UI needs for "show me this capture as a photo."
-    public static func render(_ image: RawImage, from file: LRIFile) throws -> CGImage {
+    ///
+    /// - Parameter thumbnailScale: if provided (0...1), enables `CIRAWFilter`'s
+    ///   draft mode and scales the output for a fast preview -- debayering a
+    ///   full 4160x3120 capture takes real time, and a gallery grid showing
+    ///   up to 16 lenses per shot shouldn't do that eagerly for every tile.
+    ///   Pass `nil` for full quality (detail view, export).
+    public static func render(_ image: RawImage, from file: LRIFile, thumbnailScale: Float? = nil) throws -> CGImage {
         guard let samples = try image.unpackedSamples() else {
             // BayerJPEG path: not yet wired into DNG export -- see BayerJPEG.swift's
             // documented plane-ordering uncertainty; revisit once that's confirmed.
@@ -55,6 +61,10 @@ public enum ImageRenderer {
         guard let filter = CIRAWFilter(imageData: dngData, identifierHint: nil) else {
             throw ImageRendererError.rawFilterRejectedDNG
         }
+        if let thumbnailScale {
+            filter.isDraftModeEnabled = true
+            filter.scaleFactor = thumbnailScale
+        }
         guard let ciImage = filter.outputImage else {
             throw ImageRendererError.rawFilterProducedNoOutput
         }
@@ -62,6 +72,13 @@ public enum ImageRenderer {
             throw ImageRendererError.renderFailed
         }
         return cgImage
+    }
+
+    /// Convenience for gallery/grid thumbnails: fast draft-mode render,
+    /// scaled so its longest side is approximately `maxDimension` pixels.
+    public static func renderThumbnail(_ image: RawImage, from file: LRIFile, maxDimension: Int = 512) throws -> CGImage {
+        let scale = Float(maxDimension) / Float(max(image.width, image.height))
+        return try render(image, from: file, thumbnailScale: min(1.0, max(0.05, scale)))
     }
 
     /// Writes the raw DNG (no rendering) -- the "give me a real RAW file"

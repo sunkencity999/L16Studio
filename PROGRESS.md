@@ -83,3 +83,35 @@ appropriate for continued iteration, not a v1 blocker.
   per-image dimensions/sensor/calibration, unpacks pixels and reports
   min/max/mean, and (for the reference camera) writes a debug preview PNG,
   a real DNG, and a `CIRAWFilter`-rendered PNG from that DNG.
+
+## SwiftUI app shell (task #19, 2026-07-29)
+
+A real, native macOS app (`L16Studio.app`), project generated via `xcodegen`
+(`project.yml` is the source of truth -- run `xcodegen generate` after
+cloning; `.xcodeproj` and the generated `Info.plist` are gitignored). Views:
+`ContentView` (sidebar + drag-and-drop import), `ShotGalleryView` (per-shot
+metadata header + thumbnail grid), `CaptureThumbnailView` (async fast-draft
+render per tile), `CaptureDetailView` (full-res render + export menu).
+
+**Fully validated end-to-end through the actual built app**, not just the
+CLI tool -- launched it, imported a real `.lri` file via File > Open,
+confirmed the gallery showed the correct capture count (9 of 10, correctly
+excluding the mono module) and metadata (56mm, 9 lenses), opened a capture's
+detail view (full-res debayer), and exported a real JPEG via the Export
+menu's save panel -- verified the resulting file on disk is a valid
+4160x3120 JPEG.
+
+**Bug found and fixed during this validation**: `.lri` isn't a
+system-registered UTType, so `UTType(filenameExtension: "lri")` silently
+failed and the Open panel's file filter showed everything (not nothing).
+Fixed by declaring a proper `UTImportedTypeDeclarations` entry in
+`project.yml` (`dev.sunkencity.L16Studio.lri`) and referencing that type
+identifier directly in `LibraryModel.swift` -- confirmed fixed by checking
+Documents (showed all files greyed out except `.lri`) and navigating
+directly to a real `.lri` file (showed enabled, with a proper "Light L...
+Image" kind label).
+
+**Known limitations carried over from earlier tasks, not fixed here**: color
+accuracy (generic sRGB matrix placeholder, not Light's own calibration) and
+BayerJPEG-format captures (excluded from the gallery via `renderableImages`
+filtering) -- both documented in `ImageRenderer.swift`/`DNGWriter.swift`.
