@@ -147,6 +147,39 @@ public enum AwbMode: Sendable {
     }
 }
 
+/// Maps directly to standard EXIF/TIFF orientation codes (1-8) for
+/// convenience when writing those tags.
+///
+/// NOTE: this maps by matching label semantics (rotation direction + flip)
+/// between Light's enum and the EXIF/TIFF standard, not a confirmed spec
+/// cross-reference -- there's no documented mapping from either Light or
+/// the community reverse-engineering projects. Verify against a shot taken
+/// in a known physical orientation before trusting this for anything beyond
+/// "normal".
+public enum Orientation: UInt16, Sendable {
+    case normal = 1
+    case hflip = 2
+    case rot180 = 3
+    case vflip = 4
+    case rot90CwVflip = 5 // transpose
+    case rot90Cw = 6
+    case rot90CcwVflip = 7 // transverse
+    case rot90Ccw = 8
+
+    init(_ pb: Ltpb_ViewPreferences.Orientation) {
+        switch pb {
+        case .normal: self = .normal
+        case .hflip: self = .hflip
+        case .rot180: self = .rot180
+        case .vflip: self = .vflip
+        case .rot90CwVflip: self = .rot90CwVflip
+        case .rot90Cw: self = .rot90Cw
+        case .rot90CcwVflip: self = .rot90CcwVflip
+        case .rot90Ccw: self = .rot90Ccw
+        }
+    }
+}
+
 public struct AwbGain: Sendable {
     public let r: Float
     public let gr: Float

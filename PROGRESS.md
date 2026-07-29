@@ -45,8 +45,41 @@ all are >= the packed10bpp baseline size, and BayerJPEG should compress
 smaller). If we ever find or produce a real BayerJPEG sample, re-verify
 the plane ordering against it before trusting color output from that path.
 
-### Tools
+## Debayer / color pipeline (task #17, 2026-07-29)
+
+**Architecture decision**: rather than write our own GPU demosaic kernel,
+`DNGWriter.swift` builds a minimal, valid "mosaiced raw" DNG file (hand-rolled
+TIFF writer in `TIFFWriter.swift`, no external dependency) from a decoded
+`RawImage` + its CFA pattern, then hands off to Apple's own `CIRAWFilter`
+(ImageIO/RawCamera.framework) to debayer, apply the color matrix, and render
+-- macOS already has a mature, hardware-accelerated raw pipeline; no reason
+to reimplement demosaicing ourselves. This also means most of task #18 (DNG
+export) is already done as a side effect of building this.
+
+**Validated against real data**: `CIRAWFilter` accepted our hand-written DNG
+and rendered a full 4160x3120 color image with clean, alias-free demosaicing
+-- this conclusively proves the CFA-pattern-from-`sensor_bayer_red_override`
+logic (`CFAPattern.swift`) is correct, since a wrong CFA guess produces
+obvious checkerboard/moire artifacts, not clean edges.
+
+**Known open issue -- color accuracy**: Light's own calibration matrices
+(`forwardMatrix`/`colorMatrix` from `ColorInfo`) produce a heavily saturated
+green cast when fed to `CIRAWFilter` as `ColorMatrix1`, tried both directly
+and inverted. Likely cause: those matrices were calibrated for Light's own
+proprietary `CIAPI`/`libcp` rendering pipeline (see the LRI-format research
+summary), not for DNG's specific colorimetric convention -- may need a
+different combination/normalization than DNG expects. A generic sRGB D65
+XYZ->camera matrix produces a far more plausible (if not color-accurate)
+result and is the current default. Also: `CIRAWFilter` appears to ignore our
+`AsShotNeutral` tag entirely (real calibration values vs. identity produced
+near-identical renders) -- needs investigation, possibly a `CIRAWFilter`
+option needs to be set explicitly. Both are documented inline in
+`DNGWriter.swift`'s doc comment. Real photos, not accurate colors yet --
+appropriate for continued iteration, not a v1 blocker.
+
+## Tools
 
 - `swift run lriprobe <file.lri> [...]` -- CLI inspector: prints metadata,
   per-image dimensions/sensor/calibration, unpacks pixels and reports
-  min/max/mean, and (for the reference camera) writes a debug preview PNG.
+  min/max/mean, and (for the reference camera) writes a debug preview PNG,
+  a real DNG, and a `CIRAWFilter`-rendered PNG from that DNG.

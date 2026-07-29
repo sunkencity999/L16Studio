@@ -15,6 +15,7 @@ public struct ShotMetadata: Sendable {
     public var onTripod: Bool?
     public var awbMode: AwbMode?
     public var awbGain: AwbGain?
+    public var orientation: Orientation?
     public var sensorData: [SensorData] = []
     public var latitude: Double?
     public var longitude: Double?
@@ -248,6 +249,9 @@ public struct LRIFile: Sendable {
         }
         if vp.hasAwbGains {
             metadata.awbGain = AwbGain(vp.awbGains)
+        }
+        if vp.hasOrientation {
+            metadata.orientation = Orientation(vp.orientation)
         }
     }
 }

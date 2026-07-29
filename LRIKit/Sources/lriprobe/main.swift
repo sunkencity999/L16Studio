@@ -1,8 +1,42 @@
 import Foundation
 import LRIKit
 import CoreGraphics
+import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
+
+func writeDNGAndRender(image: RawImage, samples: [UInt16], blackLevel: Float?, orientation: Orientation, baseURL: URL) {
+    do {
+        let dngData = try DNGWriter.write(image: image, samples: samples, blackLevel: blackLevel, orientation: orientation)
+        let dngURL = baseURL.deletingPathExtension().appendingPathExtension("dng")
+        try dngData.write(to: dngURL)
+        print("      wrote DNG: \(dngURL.path) (\(dngData.count) bytes)")
+
+        guard let filter = CIRAWFilter(imageData: dngData, identifierHint: nil) else {
+            print("      CIRAWFilter rejected the DNG")
+            return
+        }
+        guard let outputImage = filter.outputImage else {
+            print("      CIRAWFilter produced no output image")
+            return
+        }
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+            print("      failed to render CIRAWFilter output")
+            return
+        }
+        let pngURL = baseURL.deletingPathExtension().appendingPathExtension("rendered.png")
+        guard let dest = CGImageDestinationCreateWithURL(pngURL as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            print("      failed to create PNG destination for rendered output")
+            return
+        }
+        CGImageDestinationAddImage(dest, cgImage, nil)
+        CGImageDestinationFinalize(dest)
+        print("      wrote CIRAWFilter-rendered PNG: \(pngURL.path) (\(cgImage.width)x\(cgImage.height))")
+    } catch {
+        print("      DNG pipeline error: \(error)")
+    }
+}
 
 func writeGrayscalePNG(samples: [UInt16], width: Int, height: Int, maxValue: UInt16, to url: URL) {
     var eightBit = [UInt8](repeating: 0, count: width * height)
@@ -81,6 +115,9 @@ for path in arguments.dropFirst() {
                 formatDesc = "bayerJpeg(format=\(fmt), jpeg0=\(j0.count)b, jpeg1=\(j1.count)b, jpeg2=\(j2.count)b, jpeg3=\(j3.count)b)"
             }
             print("  [\(image.camera)] \(image.width)x\(image.height) sensor=\(image.sensor) sbro=\(image.bayerRedOverride) colors=\(image.color.count) data=\(formatDesc)")
+            for c in image.color {
+                print("      color[\(c.whitepoint)]: rg=\(c.rgRatio) bg=\(c.bgRatio) forward=\(c.forwardMatrix) color=\(c.colorMatrix)")
+            }
 
             if let samples = try image.unpackedSamples() {
                 let minV = samples.min() ?? 0
@@ -93,6 +130,13 @@ for path in arguments.dropFirst() {
                     let outURL = url.deletingLastPathComponent()
                         .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_\(image.camera)_preview.png")
                     writeGrayscalePNG(samples: preview.samples, width: preview.width, height: preview.height, maxValue: 1023, to: outURL)
+
+                    if image.cfaPattern != nil {
+                        let dngBaseURL = url.deletingLastPathComponent()
+                            .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_\(image.camera)")
+                        let blackLevel = file.metadata.sensorData.first(where: { $0.sensorType == .ar1335 })?.characterization.blackLevel
+                        writeDNGAndRender(image: image, samples: samples, blackLevel: blackLevel, orientation: file.metadata.orientation ?? .normal, baseURL: dngBaseURL)
+                    }
                 }
             } else if case .bayerJpeg = image.data {
                 let planes = try image.decodedBayerPlanes()
