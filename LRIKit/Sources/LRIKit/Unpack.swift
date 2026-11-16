@@ -84,12 +84,28 @@ public func unpackTenBit(_ packed: Data, count: Int) throws -> [UInt16] {
     return output
 }
 
+/// Unpacks a whole sensor frame into row-major, top-left-first samples.
+///
+/// `unpackTenBit` is a faithful port of the reference decoder, which reverses
+/// the byte buffer before reading it -- so its output is the frame in
+/// *reversed* pixel order (the image rotated 180 degrees). That is harmless
+/// for statistics but wrong for pictures: the image is upside down and,
+/// because the dimensions are even, the Bayer phase is shifted by one in both
+/// axes, which swaps red and blue relative to `sensor_bayer_red_override`.
+/// Confirmed against the camera's own JPEG of the same shot (2026-11-16).
+public func unpackTenBitFrame(_ packed: Data, count: Int) throws -> [UInt16] {
+    var samples = try unpackTenBit(packed, count: count)
+    samples.reverse()
+    return samples
+}
+
 extension RawImage {
-    /// Unpacked 10-bit samples, if this capture is in `RAW_PACKED_10BPP`
+    /// Unpacked 10-bit samples in sensor readout order (row-major, top-left
+    /// first -- see `unpackTenBitFrame`), if this capture is in `RAW_PACKED_10BPP`
     /// format. Returns `nil` for `RAW_BAYER_JPEG` captures -- use
     /// `decodedBayerPlanes()` for those instead.
     public func unpackedSamples() throws -> [UInt16]? {
         guard case .packed10bpp(let data) = data else { return nil }
-        return try unpackTenBit(data, count: width * height)
+        return try unpackTenBitFrame(data, count: width * height)
     }
 }

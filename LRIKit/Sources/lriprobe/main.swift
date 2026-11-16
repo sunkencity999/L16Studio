@@ -70,7 +70,7 @@ guard arguments.count > 1 else {
     exit(1)
 }
 
-for path in arguments.dropFirst() {
+for path in arguments.dropFirst() where !path.hasPrefix("--") {
     print("=== \(path) ===")
     let url = URL(fileURLWithPath: path)
     do {
@@ -84,6 +84,9 @@ for path in arguments.dropFirst() {
         print("hdr mode: \(file.metadata.hdrMode.map(String.init(describing:)) ?? "?")")
         print("scene mode: \(file.metadata.sceneMode.map(String.init(describing:)) ?? "?")")
         print("awb mode: \(file.metadata.awbMode.map(String.init(describing:)) ?? "?")")
+        print("awb gains: \(file.metadata.awbGain.map { "r=\($0.r) gr=\($0.gr) gb=\($0.gb) b=\($0.b)" } ?? "?")")
+        print("orientation: \(file.metadata.orientation.map(String.init(describing:)) ?? "?")")
+        print("image gain: \(file.metadata.imageGain.map { String($0) } ?? "?")  integration: \(file.metadata.imageIntegrationTime.map { String($0) } ?? "?") s")
         print("on tripod: \(file.metadata.onTripod.map(String.init) ?? "?")")
         let lat = file.metadata.latitude
         let lon = file.metadata.longitude
@@ -92,6 +95,30 @@ for path in arguments.dropFirst() {
         print("camera infos (hw map): \(file.cameraInfos.count)")
         print("image count: \(file.images.count)")
 
+        if CommandLine.arguments.contains("--fuse") {
+            // Stage-one fusion: merge the lenses that share the reference's focal length.
+            let (fused, report) = try WideFusion.fuse(file: file) { message, fraction in
+                print(String(format: "  fuse %3.0f%%  %@", fraction * 100, message))
+            }
+            let outURL = url.deletingLastPathComponent()
+                .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_fused.tif")
+            if let dest = CGImageDestinationCreateWithURL(outURL as CFURL, "public.tiff" as CFString, 1, nil) {
+                CGImageDestinationAddImage(dest, fused, [kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFCompression: 5]] as CFDictionary)
+                CGImageDestinationFinalize(dest)
+            }
+            let jpegURL = outURL.deletingPathExtension().appendingPathExtension("jpg")
+            if let dest = CGImageDestinationCreateWithURL(jpegURL as CFURL, "public.jpeg" as CFString, 1, nil) {
+                CGImageDestinationAddImage(dest, fused, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+                CGImageDestinationFinalize(dest)
+            }
+            print("fused \(report.frames.count + 1) lenses onto \(report.reference.label) in \(String(format: "%.1f", report.seconds)) s -> \(outURL.lastPathComponent)")
+            for f in report.frames {
+                print(String(format: "  %@: median shift %.1f px, max %.1f px, accepted over %.0f%% of the frame",
+                             f.camera.label, f.medianShift, f.maxShift, f.coverage * 100))
+            }
+            continue
+        }
+
         for image in file.images {
             let formatDesc: String
             switch image.data {
@@ -99,7 +126,7 @@ for path in arguments.dropFirst() {
             case .bayerJpeg(_, let fmt, let j0, let j1, let j2, let j3):
                 formatDesc = "bayerJpeg(format=\(fmt), jpeg0=\(j0.count)b, jpeg1=\(j1.count)b, jpeg2=\(j2.count)b, jpeg3=\(j3.count)b)"
             }
-            print("  [\(image.camera)] \(image.width)x\(image.height) sensor=\(image.sensor) sbro=\(image.bayerRedOverride) colors=\(image.color.count) data=\(formatDesc)")
+            print("  [\(image.camera)] \(image.width)x\(image.height) sensor=\(image.sensor) sbro=\(image.bayerRedOverride) hflip=\(image.isHorizontalFlip) vflip=\(image.isVerticalFlip) again=\(image.analogGain) dgain=\(image.digitalGain.map { String($0) } ?? "-") exp=\(image.exposure)s lens=\(image.lensPosition) mirror=\(image.mirrorPosition.map { String($0) } ?? "-") colors=\(image.color.count) data=\(formatDesc)")
             for c in image.color {
                 print("      color[\(c.whitepoint)]: rg=\(c.rgRatio) bg=\(c.bgRatio) forward=\(c.forwardMatrix) color=\(c.colorMatrix)")
             }
@@ -109,6 +136,18 @@ for path in arguments.dropFirst() {
                 let maxV = samples.max() ?? 0
                 let mean = samples.reduce(0.0) { $0 + Double($1) } / Double(samples.count)
                 print("      unpacked \(samples.count) samples: min=\(minV) max=\(maxV) mean=\(String(format: "%.1f", mean))")
+
+                if CommandLine.arguments.contains("--thumbs"), image.cfaPattern != nil {
+                    // One small render per colour module, for eyeballing
+                    // per-lens colour and orientation side by side.
+                    let thumbURL = url.deletingLastPathComponent()
+                        .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_\(image.camera)_thumb.jpg")
+                    if let cg = try? ImageRenderer.renderThumbnail(image, from: file, maxDimension: 640),
+                       let dest = CGImageDestinationCreateWithURL(thumbURL as CFURL, "public.jpeg" as CFString, 1, nil) {
+                        CGImageDestinationAddImage(dest, cg, nil)
+                        CGImageDestinationFinalize(dest)
+                    }
+                }
 
                 if image.camera == file.metadata.referenceCamera {
                     let preview = quickPreview(samples: samples, width: image.width, height: image.height)

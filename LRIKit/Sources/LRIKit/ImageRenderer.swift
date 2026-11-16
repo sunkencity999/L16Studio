@@ -55,7 +55,9 @@ public enum ImageRenderer {
             image: image,
             samples: samples,
             blackLevel: blackLevel,
-            orientation: file.metadata.orientation ?? .normal
+            orientation: file.metadata.orientation ?? .normal,
+            neutral: image.asShotNeutral(file.metadata),
+            baselineExposure: image.baselineExposure(file.metadata)
         )
 
         guard let filter = CIRAWFilter(imageData: dngData, identifierHint: nil) else {
@@ -92,7 +94,9 @@ public enum ImageRenderer {
             image: image,
             samples: samples,
             blackLevel: blackLevel,
-            orientation: file.metadata.orientation ?? .normal
+            orientation: file.metadata.orientation ?? .normal,
+            neutral: image.asShotNeutral(file.metadata),
+            baselineExposure: image.baselineExposure(file.metadata)
         )
         try dngData.write(to: url)
     }

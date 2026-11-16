@@ -1,0 +1,284 @@
+import Foundation
+import CoreGraphics
+
+public enum FusionError: Error, CustomStringConvertible {
+    case noReference
+    case nothingToMerge
+
+    public var description: String {
+        switch self {
+        case .noReference: "this shot has no usable colour reference lens"
+        case .nothingToMerge: "no other lenses with the reference's focal length could be merged"
+        }
+    }
+}
+
+/// What a fusion run did, for display and for judging the result.
+public struct FusionReport: Sendable {
+    public struct Frame: Sendable {
+        public let camera: CameraID
+        /// Median displacement of this lens relative to the reference, in pixels.
+        public let medianShift: Float
+        /// Largest tile displacement, in pixels (close objects shift most).
+        public let maxShift: Float
+        /// Share of the picture where this lens agreed with the reference
+        /// well enough to contribute (0...1).
+        public let coverage: Float
+    }
+    public let reference: CameraID
+    public let frames: [Frame]
+    public let seconds: Double
+}
+
+/// Stage one of lens fusion: merge every colour lens that shares the
+/// reference lens's focal length into one image.
+///
+/// Each extra lens is aligned to the reference tile by tile (the lenses see
+/// the scene from slightly different positions), resampled onto the
+/// reference's pixel grid, matched to it in brightness and colour, and then
+/// merged. The merge is detail-aware: where a lens is sharper than the
+/// others (the camera focuses its modules at different distances) it
+/// dominates; where they are equally sharp they are averaged, which lowers
+/// noise. A lens is ignored wherever it disagrees with the reference
+/// (occlusions near close objects, failed alignment), so problems show up as
+/// "no improvement there" instead of ghosting.
+public enum WideFusion {
+    public typealias Progress = @Sendable (_ message: String, _ fraction: Double) -> Void
+
+    public static func fuse(
+        file: LRIFile,
+        adjustments: RenderAdjustments = .none,
+        progress: Progress? = nil
+    ) throws -> (image: CGImage, report: FusionReport) {
+        let start = Date()
+        guard let reference = file.referenceImage ?? file.images.first(where: { $0.cfaPattern != nil }),
+              reference.cfaPattern != nil else {
+            throw FusionError.noReference
+        }
+        let others = file.images.filter {
+            $0.camera != reference.camera
+                && $0.cfaPattern != nil
+                && $0.camera.focalLength == reference.camera.focalLength
+                && $0.width == reference.width && $0.height == reference.height
+        }
+        guard !others.isEmpty else { throw FusionError.nothingToMerge }
+
+        let steps = Double(others.count + 2)
+        progress?("Developing \(reference.camera.label)", 0)
+        let ref = try LensRenderer(image: reference, file: file).renderLinear(adjustments)
+        let refLuma = ref.alignmentLuma()
+        var merger = DetailMerger(reference: ref)
+
+        var frames: [FusionReport.Frame] = []
+        for (index, lens) in others.enumerated() {
+            progress?("Aligning \(lens.camera.label)", Double(index + 1) / steps)
+            let source = try LensRenderer(image: lens, file: file).renderLinear(adjustments)
+            let field = TileAligner.align(reference: refLuma, target: source.alignmentLuma()).smoothed()
+            var (warped, valid) = field.warp(source)
+            let trust = field.reliability(width: valid.width, height: valid.height)
+            for i in 0..<valid.data.count { valid.data[i] *= trust.data[i] }
+            let coverage = merger.add(warped, valid: valid)
+
+            let magnitudes = zip(field.dx, field.dy).map { ($0 * $0 + $1 * $1).squareRoot() }.sorted()
+            frames.append(.init(
+                camera: lens.camera,
+                medianShift: magnitudes[magnitudes.count / 2],
+                maxShift: magnitudes.last ?? 0,
+                coverage: coverage
+            ))
+        }
+
+        progress?("Merging", (steps - 1) / steps)
+        guard let image = merger.result().makeCGImage() else { throw ImageRendererError.renderFailed }
+        progress?("Done", 1)
+        return (image, FusionReport(reference: reference.camera, frames: frames, seconds: Date().timeIntervalSince(start)))
+    }
+}
+
+/// Accumulates aligned frames into a two-band (base + detail) weighted merge.
+struct DetailMerger {
+    /// Split between "base" (tone, colour) and "detail" (texture, edges).
+    static let bandSigma: Float = 2.5
+    /// Relative base-band difference at which a frame's weight falls to half.
+    static let ghostTolerance: Float = 0.10
+
+    private let width: Int
+    private let height: Int
+    private let refBase: RGBPlanes
+    private let refBaseLuma: Plane
+
+    private var baseSum: RGBPlanes
+    private var detailSum: RGBPlanes
+    private var baseWeight: Plane
+    private var detailWeight: Plane
+
+    init(reference: RGBPlanes) {
+        width = reference.width
+        height = reference.height
+        let base = RGBPlanes(
+            r: reference.r.blurred(sigma: Self.bandSigma),
+            g: reference.g.blurred(sigma: Self.bandSigma),
+            b: reference.b.blurred(sigma: Self.bandSigma))
+        refBase = base
+        refBaseLuma = base.luma()
+
+        let sharpness = Self.sharpness(of: reference, base: base)
+        // The reference always counts fully in the consistency sense.
+        let consistency = Plane(width: width, height: height, repeating: 1)
+        baseSum = RGBPlanes(r: Plane(width: width, height: height), g: Plane(width: width, height: height), b: Plane(width: width, height: height))
+        detailSum = baseSum
+        baseWeight = Plane(width: width, height: height)
+        detailWeight = Plane(width: width, height: height)
+        accumulate(reference, base: base, sharpness: sharpness, consistency: consistency)
+    }
+
+    /// Local detail energy: blurred magnitude of the luminance detail band.
+    private static func sharpness(of image: RGBPlanes, base: RGBPlanes) -> Plane {
+        var detail = image.luma()
+        let baseLuma = base.luma()
+        let count = detail.data.count
+        detail.data.withUnsafeMutableBufferPointer { d in
+            baseLuma.data.withUnsafeBufferPointer { b in
+                parallelRows(image.height) { rows in
+                    for i in (rows.lowerBound * image.width)..<min(count, rows.upperBound * image.width) {
+                        d[i] = abs(d[i] - b[i])
+                    }
+                }
+            }
+        }
+        return detail.blurred(sigma: 4)
+    }
+
+    /// Adds one frame already resampled onto the reference grid. Returns the
+    /// share of the picture where it was accepted.
+    mutating func add(_ frame: RGBPlanes, valid: Plane) -> Float {
+        var frame = frame
+        matchTone(&frame, valid: valid)
+
+        let base = RGBPlanes(
+            r: frame.r.blurred(sigma: Self.bandSigma),
+            g: frame.g.blurred(sigma: Self.bandSigma),
+            b: frame.b.blurred(sigma: Self.bandSigma))
+
+        // Consistency: how closely this frame's base band matches the
+        // reference's, relative to local brightness.
+        var consistency = base.luma()
+        let w = width, h = height
+        let tol = Self.ghostTolerance
+        consistency.data.withUnsafeMutableBufferPointer { c in
+            refBaseLuma.data.withUnsafeBufferPointer { r in
+                valid.data.withUnsafeBufferPointer { v in
+                    parallelRows(h) { rows in
+                        for i in (rows.lowerBound * w)..<(rows.upperBound * w) {
+                            let d = abs(c[i] - r[i]) / (r[i] + 0.02) / tol
+                            let d2 = d * d
+                            c[i] = v[i] / (1 + d2 * d2)
+                        }
+                    }
+                }
+            }
+        }
+        // Erode-and-feather: take the minimum of the map and its blur so a
+        // rejected area also suppresses its immediate surroundings.
+        let soft = consistency.blurred(sigma: 3)
+        var accepted: Double = 0
+        consistency.data.withUnsafeMutableBufferPointer { c in
+            soft.data.withUnsafeBufferPointer { s in
+                for i in 0..<c.count {
+                    c[i] = min(c[i], s[i])
+                    accepted += Double(c[i])
+                }
+            }
+        }
+
+        let sharpness = Self.sharpness(of: frame, base: base)
+        accumulate(frame, base: base, sharpness: sharpness, consistency: consistency)
+        return Float(accepted / Double(w * h))
+    }
+
+    /// Matches the frame's low-frequency brightness and colour to the
+    /// reference (modules differ slightly in exposure, vignetting and tint).
+    private func matchTone(_ frame: inout RGBPlanes, valid: Plane) {
+        let factor = 16
+        func gain(_ channel: Plane, _ reference: Plane) -> Plane {
+            let a = reference.downsampled(by: factor).blurred(sigma: 2)
+            let b = channel.downsampled(by: factor).blurred(sigma: 2)
+            var ratio = Plane(width: a.width, height: a.height)
+            for i in 0..<ratio.data.count {
+                ratio.data[i] = min(2, max(0.5, (a.data[i] + 0.002) / (b.data[i] + 0.002)))
+            }
+            return ratio.resized(width: channel.width, height: channel.height)
+        }
+        func apply(_ channel: inout Plane, _ gain: Plane) {
+            let w = channel.width, h = channel.height
+            channel.data.withUnsafeMutableBufferPointer { c in
+                gain.data.withUnsafeBufferPointer { g in
+                    parallelRows(h) { rows in
+                        for i in (rows.lowerBound * w)..<(rows.upperBound * w) { c[i] *= g[i] }
+                    }
+                }
+            }
+        }
+        // Use the reference's own (unblurred) planes via its base at this scale.
+        apply(&frame.r, gain(frame.r, refBase.r))
+        apply(&frame.g, gain(frame.g, refBase.g))
+        apply(&frame.b, gain(frame.b, refBase.b))
+    }
+
+    private mutating func accumulate(_ image: RGBPlanes, base: RGBPlanes, sharpness: Plane, consistency: Plane) {
+        Self.accumulate(image.r, base.r, sharpness, consistency, &baseSum.r, &detailSum.r, &baseWeight, &detailWeight, updateWeights: true)
+        Self.accumulate(image.g, base.g, sharpness, consistency, &baseSum.g, &detailSum.g, &baseWeight, &detailWeight, updateWeights: false)
+        Self.accumulate(image.b, base.b, sharpness, consistency, &baseSum.b, &detailSum.b, &baseWeight, &detailWeight, updateWeights: false)
+    }
+
+    private static func accumulate(
+        _ img: Plane, _ bse: Plane, _ sharpness: Plane, _ consistency: Plane,
+        _ bSum: inout Plane, _ dSum: inout Plane, _ baseWeight: inout Plane, _ detailWeight: inout Plane,
+        updateWeights: Bool
+    ) {
+        let w = img.width, h = img.height
+        let epsilon: Float = 2e-4
+        img.data.withUnsafeBufferPointer { ip in
+        bse.data.withUnsafeBufferPointer { bp in
+        sharpness.data.withUnsafeBufferPointer { sp in
+        consistency.data.withUnsafeBufferPointer { cp in
+        bSum.data.withUnsafeMutableBufferPointer { bs in
+        dSum.data.withUnsafeMutableBufferPointer { ds in
+        baseWeight.data.withUnsafeMutableBufferPointer { bw in
+        detailWeight.data.withUnsafeMutableBufferPointer { dw in
+            parallelRows(h) { rows in
+                for i in (rows.lowerBound * w)..<(rows.upperBound * w) {
+                    let s = sp[i] + epsilon
+                    // Base band: mild preference for the sharper frame.
+                    // Detail band: strong preference (squared), so an
+                    // out-of-focus lens can't soften a sharp one.
+                    let wb = cp[i] * s
+                    let wd = cp[i] * s * s
+                    bs[i] += wb * bp[i]
+                    ds[i] += wd * (ip[i] - bp[i])
+                    if updateWeights { bw[i] += wb; dw[i] += wd }
+                }
+            }
+        }}}}}}}}
+    }
+
+    func result() -> RGBPlanes {
+        let w = width, h = height
+        func channel(_ bSum: Plane, _ dSum: Plane) -> Plane {
+            var out = Plane(width: w, height: h)
+            bSum.data.withUnsafeBufferPointer { bs in
+            dSum.data.withUnsafeBufferPointer { ds in
+            baseWeight.data.withUnsafeBufferPointer { bw in
+            detailWeight.data.withUnsafeBufferPointer { dw in
+            out.data.withUnsafeMutableBufferPointer { o in
+                parallelRows(h) { rows in
+                    for i in (rows.lowerBound * w)..<(rows.upperBound * w) {
+                        o[i] = bs[i] / bw[i] + ds[i] / dw[i]
+                    }
+                }
+            }}}}}
+            return out
+        }
+        return RGBPlanes(r: channel(baseSum.r, detailSum.r), g: channel(baseSum.g, detailSum.g), b: channel(baseSum.b, detailSum.b))
+    }
+}

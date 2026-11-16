@@ -150,7 +150,7 @@ public struct LRIFile: Sendable {
             }
 
             let sbro = module.sensorBayerRedOverride
-            images.append(RawImage(
+            var image = RawImage(
                 camera: CameraID(module.id),
                 sensor: .unknown, // backfilled in decode() once all blocks are seen
                 width: width,
@@ -159,7 +159,15 @@ public struct LRIFile: Sendable {
                 data: rawData,
                 bayerRedOverride: (Int(sbro.x), Int(sbro.y)),
                 color: []
-            ))
+            )
+            image.isHorizontalFlip = module.sensorIsHorizontalFlip
+            image.isVerticalFlip = module.sensorIsVerticalFlip
+            image.analogGain = module.sensorAnalogGain
+            image.digitalGain = module.hasSensorDigitalGain ? module.sensorDigitalGain : nil
+            image.exposure = TimeInterval(module.sensorExposure) / 1_000_000_000
+            image.lensPosition = module.lensPosition
+            image.mirrorPosition = module.hasMirrorPosition ? module.mirrorPosition : nil
+            images.append(image)
         }
 
         if header.hasImageReferenceCamera {

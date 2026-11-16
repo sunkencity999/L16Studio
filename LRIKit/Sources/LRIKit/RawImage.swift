@@ -25,4 +25,14 @@ public struct RawImage: Sendable {
     /// note on `sensor_bayer_red_override` for why this varies per capture.
     public let bayerRedOverride: (x: Int, y: Int)
     public var color: [ColorInfo]
+    /// `sensor_is_horizontal_flip` / `sensor_is_vertical_flip` from the
+    /// module record: whether the sensor was read out mirrored.
+    public var isHorizontalFlip = false
+    public var isVerticalFlip = false
+    /// Per-module exposure for this frame.
+    public var analogGain: Float = 1
+    public var digitalGain: Float?
+    public var exposure: TimeInterval = 0
+    public var lensPosition: Int32 = 0
+    public var mirrorPosition: Int32?
 }

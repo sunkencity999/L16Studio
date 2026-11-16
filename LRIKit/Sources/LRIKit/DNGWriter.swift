@@ -38,32 +38,29 @@ public enum DNGWriterError: Error, CustomStringConvertible {
 }
 
 public enum DNGWriter {
-    /// Writes a minimal, valid "mosaiced raw" DNG for one Bayer capture:
-    /// the raw sensor samples plus the CFA pattern and color calibration
-    /// needed for a real raw converter (Apple's `CIRAWFilter`/ImageIO, or
-    /// Lightroom/etc.) to debayer and render it -- we don't do demosaicing
-    /// ourselves, we hand off to macOS's existing, mature raw pipeline.
-    /// Validated against a real capture: `CIRAWFilter` accepts this output
-    /// and produces a correctly demosaiced (no color moire/aliasing) image,
-    /// which conclusively confirms the CFA-pattern-from-`sensor_bayer_red_
-    /// override` logic in `CFAPattern.swift` is correct.
+    /// Writes a "mosaiced raw" DNG for one Bayer capture: the raw sensor
+    /// samples plus the CFA pattern and Light's factory colour calibration,
+    /// so a real raw converter (Apple's `CIRAWFilter`/ImageIO, Lightroom,
+    /// etc.) can demosaic and render it.
     ///
-    /// **Known open issue -- color is not yet accurate.** Light's own
-    /// `forwardMatrix`/`colorMatrix` calibration data (tried both directly
-    /// as `ColorMatrix1` and inverted) produces a heavily saturated green
-    /// cast when run through `CIRAWFilter` -- likely because Light's matrices
-    /// were calibrated for their own `CIAPI`/`libcp` rendering pipeline
-    /// (see the LRI-format research), not for DNG's specific colorimetric
-    /// convention, and may need a different combination/normalization than
-    /// DNG expects. A generic sRGB D65 XYZ->camera matrix produces a far
-    /// more plausible (if not perfectly accurate) result, so that's the
-    /// current default. Also observed: `CIRAWFilter` appears to ignore our
-    /// `AsShotNeutral` tag entirely (real vs. identity values produced
-    /// near-identical output) -- worth investigating further, possibly a
-    /// `CIRAWFilter` option needs to be set explicitly rather than relying
-    /// on defaults. Revisit both before trusting color output for anything
-    /// beyond "a recognizable photo."
-    public static func write(image: RawImage, samples: [UInt16], blackLevel: Float? = nil, orientation: Orientation = .normal) throws -> Data {
+    /// Colour: Light's per-module calibration is in standard DNG form --
+    /// `colorMatrix` is an XYZ->camera `ColorMatrix` and `forwardMatrix` is a
+    /// white-balanced-camera->XYZ(D50) `ForwardMatrix` (its rows sum to the
+    /// D50 white point). We write the illuminant-A and D65 pairs as
+    /// calibration 1 and 2. `neutral` is the camera-native RGB of a neutral
+    /// surface for this shot (`AsShotNeutral`); see `RawImage.asShotNeutral`.
+    /// `baselineExposure` (EV) brings a module captured at a lower gain than
+    /// the shot's nominal gain up to the intended brightness.
+    ///
+    /// `samples` must be in sensor readout order (see `unpackTenBitFrame`).
+    public static func write(
+        image: RawImage,
+        samples: [UInt16],
+        blackLevel: Float? = nil,
+        orientation: Orientation = .normal,
+        neutral: (r: Float, g: Float, b: Float)? = nil,
+        baselineExposure: Float = 0
+    ) throws -> Data {
         guard let cfa = image.cfaPattern else {
             throw DNGWriterError.monoNotYetSupported
         }
@@ -71,26 +68,18 @@ public enum DNGWriter {
             throw DNGWriterError.sampleCountMismatch(expected: image.width * image.height, got: samples.count)
         }
 
-        // Prefer daylight-ish calibration (matches RawImage.daylight() in the
-        // Rust reference: F7, falling back to D65), then just take whatever's there.
-        // Not currently used for ColorMatrix1 (see doc comment above) but kept
-        // for AsShotNeutral and CalibrationIlluminant1.
-        let color = image.color.first(where: { $0.whitepoint == .f7 })
-            ?? image.color.first(where: { $0.whitepoint == .d65 })
-            ?? image.color.first
+        func usable(_ c: ColorInfo?) -> ColorInfo? {
+            guard let c, c.colorMatrix.0 != 0 || c.colorMatrix.4 != 0 else { return nil }
+            return c
+        }
+        let calA = usable(image.color.first { $0.whitepoint == .a })
+        let calD65 = usable(image.color.first { $0.whitepoint == .d65 })
+        let single = calD65 ?? calA ?? usable(image.color.first)
 
-        // Generic sRGB D65 XYZ->camera matrix -- see doc comment above for
-        // why we're not using Light's own calibration matrix here yet.
-        let colorMatrix1: Matrix3x3 = (
-            3.2404542, -1.5371385, -0.4985314,
-            -0.9692660, 1.8760108, 0.0415560,
-            0.0556434, -0.2040259, 1.0572252
-        )
-
-        var pixelData = Data(capacity: samples.count * 2)
-        for s in samples {
-            pixelData.append(UInt8(s & 0xff))
-            pixelData.append(UInt8((s >> 8) & 0xff))
+        var pixelData = Data(count: samples.count * 2)
+        pixelData.withUnsafeMutableBytes { raw in
+            let out = raw.bindMemory(to: UInt16.self)
+            for i in samples.indices { out[i] = samples[i].littleEndian }
         }
 
         var tiff = TIFFWriter()
@@ -114,36 +103,82 @@ public enum DNGWriter {
 
         tiff.add(tag: 50706, bytes: [1, 4, 0, 0]) // DNGVersion 1.4
         tiff.add(tag: 50707, bytes: [1, 1, 0, 0]) // DNGBackwardVersion
-        tiff.add(tag: 50708, ascii: "Light L16") // UniqueCameraModel
+        tiff.add(tag: 50708, ascii: "Light L16 \(image.camera)".uppercased()) // UniqueCameraModel
 
-        tiff.add(tag: 50721, srationals: [
-            srational(colorMatrix1.0), srational(colorMatrix1.1), srational(colorMatrix1.2),
-            srational(colorMatrix1.3), srational(colorMatrix1.4), srational(colorMatrix1.5),
-            srational(colorMatrix1.6), srational(colorMatrix1.7), srational(colorMatrix1.8),
-        ]) // ColorMatrix1
-
-        if let color {
-            tiff.add(tag: 50778, short: exifLightSource(color.whitepoint)) // CalibrationIlluminant1
-
-            // AsShotNeutral: the camera-native RGB triplet that should render
-            // neutral. Convention here (rgRatio/bgRatio as G-normalized
-            // ratios) is a best-effort read of the calibration data -- see
-            // the "known open issue" doc comment above, CIRAWFilter doesn't
-            // appear to be using this tag at all currently.
-            tiff.add(tag: 50728, rationals: [(1, 1), (1, 1), (1, 1)]) // AnalogBalance: identity
-            tiff.add(tag: 50729, rationals: [
-                rational(color.rgRatio), rational(1.0), rational(color.bgRatio),
-            ]) // AsShotNeutral
+        func matrixTag(_ tag: UInt16, _ m: Matrix3x3) {
+            tiff.add(tag: tag, srationals: [
+                srational(m.0), srational(m.1), srational(m.2),
+                srational(m.3), srational(m.4), srational(m.5),
+                srational(m.6), srational(m.7), srational(m.8),
+            ])
         }
 
-        // BlackLevel: use the real per-sensor value from SensorData if the
-        // caller has it (ShotMetadata.sensorData, keyed by sensor model, not
-        // per-image -- so it's threaded in as a parameter rather than read
-        // from `image` directly); 42 is a fallback matching the value the
-        // community's reference implementation hardcoded as typical.
+        if let calA, let calD65 {
+            matrixTag(50721, calA.colorMatrix)      // ColorMatrix1
+            matrixTag(50722, calD65.colorMatrix)    // ColorMatrix2
+            tiff.add(tag: 50778, short: exifLightSource(.a))   // CalibrationIlluminant1
+            tiff.add(tag: 50779, short: exifLightSource(.d65)) // CalibrationIlluminant2
+            matrixTag(50964, calA.forwardMatrix)    // ForwardMatrix1
+            matrixTag(50965, calD65.forwardMatrix)  // ForwardMatrix2
+        } else if let single {
+            matrixTag(50721, single.colorMatrix)
+            tiff.add(tag: 50778, short: exifLightSource(single.whitepoint))
+            matrixTag(50964, single.forwardMatrix)
+        } else {
+            // No factory calibration in this file: generic sRGB D65 XYZ->camera.
+            matrixTag(50721, (3.2404542, -1.5371385, -0.4985314,
+                              -0.9692660, 1.8760108, 0.0415560,
+                              0.0556434, -0.2040259, 1.0572252))
+            tiff.add(tag: 50778, short: exifLightSource(.d65))
+        }
+
+        let n = neutral ?? image.calibratedNeutral(for: .d65) ?? (1, 1, 1)
+        tiff.add(tag: 50727, rationals: [(1, 1), (1, 1), (1, 1)]) // AnalogBalance: identity
+        tiff.add(tag: 50728, rationals: [rational(n.r), rational(n.g), rational(n.b)]) // AsShotNeutral
+        tiff.add(tag: 50730, srationals: [srational(baselineExposure)]) // BaselineExposure (EV)
+
+        // BlackLevel: the real per-sensor value from SensorData when the
+        // caller has it; 42 matches the community reference's typical value.
         tiff.add(tag: 50714, long: UInt32(blackLevel ?? 42))
         tiff.add(tag: 50717, long: 1023) // WhiteLevel: true bit depth is 10-bit despite 16-bit storage
 
         return tiff.build(stripOffsetTag: 273, stripData: pixelData)
+    }
+}
+
+extension RawImage {
+    /// Camera-native RGB of a neutral surface for this shot: from the white
+    /// balance the camera chose at capture (`awb_gains`, per-channel
+    /// multipliers, so the neutral is their reciprocal), falling back to the
+    /// factory D65 calibration.
+    public func asShotNeutral(_ metadata: ShotMetadata) -> (r: Float, g: Float, b: Float)? {
+        if let g = metadata.awbGain, g.r > 0, g.b > 0, g.gr > 0, g.gb > 0 {
+            let green = (g.gr + g.gb) / 2
+            return (green / g.r, 1, green / g.b)
+        }
+        return calibratedNeutral(for: .d65)
+    }
+
+    /// EV difference between the shot's nominal exposure (gain x time) and
+    /// what this module was actually captured at. Modules in one shot differ:
+    /// the reference is often at half the gain of the others, and some run a
+    /// shorter exposure.
+    public func baselineExposure(_ metadata: ShotMetadata) -> Float {
+        guard let shotGain = metadata.imageGain, shotGain > 0 else { return 0 }
+        let moduleGain = analogGain * (digitalGain ?? 1)
+        guard moduleGain > 0 else { return 0 }
+        var ratio = shotGain / moduleGain
+        if let shotTime = metadata.imageIntegrationTime, shotTime > 0, exposure > 0 {
+            ratio *= Float(shotTime / exposure)
+        }
+        return max(-3, min(3, log2(ratio)))
+    }
+
+    /// Camera-native RGB of a neutral surface under one of the factory
+    /// calibration illuminants: `rgRatio`/`bgRatio` are R/G and B/G there.
+    public func calibratedNeutral(for whitepoint: Whitepoint) -> (r: Float, g: Float, b: Float)? {
+        guard let c = color.first(where: { $0.whitepoint == whitepoint }) ?? color.first,
+              c.rgRatio > 0, c.bgRatio > 0 else { return nil }
+        return (c.rgRatio, 1, c.bgRatio)
     }
 }

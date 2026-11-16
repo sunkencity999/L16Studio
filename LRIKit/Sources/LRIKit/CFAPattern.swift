@@ -21,17 +21,22 @@ public struct CFAPattern: Sendable {
 }
 
 extension RawImage {
-    /// The Bayer CFA pattern for this specific capture, or `nil` for a
-    /// monochrome sensor. The AR1335 is BGGR-native; `bayerRedOverride`
-    /// (`sensor_bayer_red_override`) shifts that per-shot -- see `LRI.md`'s
-    /// note on why this varies (suspected in-camera rotation correction).
+    /// The Bayer CFA pattern for this capture, or `nil` for a monochrome
+    /// sensor. `bayerRedOverride` (`sensor_bayer_red_override`) is the
+    /// position of the red site within the 2x2 tile, as (x, y), for samples
+    /// in sensor readout order (see `unpackTenBitFrame`). It differs between
+    /// modules because the sensors are mounted in different orientations.
+    ///
+    /// Verified on a real shot (2026-11-16) against the camera's own JPEG:
+    /// all nine colour modules render with correct colour under this rule,
+    /// covering all four override values.
     public var cfaPattern: CFAPattern? {
         guard sensor == .ar1335 else { return nil } // ar1335Mono and .unknown have no CFA
         switch bayerRedOverride {
-        case (0, 0): return CFAPattern(topLeft: .blue, topRight: .green, bottomLeft: .green, bottomRight: .red)   // BGGR
+        case (0, 0): return CFAPattern(topLeft: .red, topRight: .green, bottomLeft: .green, bottomRight: .blue)   // RGGB
         case (1, 0): return CFAPattern(topLeft: .green, topRight: .red, bottomLeft: .blue, bottomRight: .green)   // GRBG
         case (0, 1): return CFAPattern(topLeft: .green, topRight: .blue, bottomLeft: .red, bottomRight: .green)   // GBRG
-        case (1, 1): return CFAPattern(topLeft: .red, topRight: .green, bottomLeft: .green, bottomRight: .blue)   // RGGB
+        case (1, 1): return CFAPattern(topLeft: .blue, topRight: .green, bottomLeft: .green, bottomRight: .red)   // BGGR
         default: return nil // (-1,-1) or anything unexpected: unknown override, can't determine CFA
         }
     }
