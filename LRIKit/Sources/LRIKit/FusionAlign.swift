@@ -286,6 +286,11 @@ extension TileField {
     /// gradient -- a receding surface such as a desk or floor, where the
     /// shift changes smoothly with distance -- is still trusted.
     func reliability(width: Int, height: Int, tolerance: Float = 2.5) -> Plane {
+        reliabilityGrid(tolerance: tolerance).resized(width: width, height: height)
+    }
+
+    /// The same trust measure on the tile grid itself (one value per tile).
+    func reliabilityGrid(tolerance: Float = 2.5) -> Plane {
         var grid = Plane(width: cols, height: rows)
         func bend(_ d: [Float], _ tx: Int, _ ty: Int) -> Float {
             let i = ty * cols + tx
@@ -313,7 +318,7 @@ extension TileField {
                 eroded.data[ty * cols + tx] = m
             }
         }
-        return eroded.resized(width: width, height: height)
+        return eroded
     }
 
     /// Resamples `source` onto the reference grid: output(x, y) =

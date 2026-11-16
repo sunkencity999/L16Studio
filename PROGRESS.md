@@ -195,3 +195,42 @@ Open:
 - Mono module (A2) is not merged yet; it should help luminance noise.
 - Shot 1 looked as if B1 were rotated relative to the other telephoto frames;
   on shots 2-4 every telephoto frame is upright, so that was a misreading.
+
+## Fusion, stage two: telephoto detail (2026-11-16)
+
+`TeleFusion.fuse` (`FusionTele.swift`) builds the picture at the shot's focal
+length: the stage-one wide merge, centre-cropped by wide/shot focal length
+(28/35 = 0.8, i.e. 3328 x 2496, the same size as the camera's own JPEG) and
+enlarged by `scale` (default = telephoto magnification 70/28 = 2.5, giving
+8320 x 6240 = 52 MP), with each telephoto frame merged in. About 7.5 s.
+
+Per telephoto frame:
+1. `TelePlacement.locate`: normalised cross-correlation of the telephoto luma
+   (shrunk by 16 x 2.5) over the wide luma (shrunk by 16), exhaustive, then
+   refined at 1/8. Only needs to land within the tile aligner's reach.
+2. `TelePlacement.paste`: the telephoto luma shrunk to wide scale, gain-matched
+   and pasted into a copy of the wide luma; `TileAligner` then aligns it at
+   wide resolution, exactly as in stage one.
+3. `Resampler.warpTele`: for each output pixel, wide position -> + tile
+   displacement -> telephoto position (x magnification), bicubic sample.
+   `valid` = footprint x field reliability x a feather to the frame's edge.
+4. `DetailMerger` with the enlarged wide image as reference and
+   `bandSigma = 1.6 x scale`: the telephoto frame wins the detail band wherever
+   it is sharper than the enlarged wide image and agrees with it in the base.
+
+Results:
+- Room shot (far scene): placements score 0.72-0.94, each telephoto frame
+  contributes detail over 8-17% of the output; label text and edges are
+  visibly sharper than the wide merge at matching crops.
+- Close-range shots (keyboard, desk, gadget): placement scores 0.41-0.80 and
+  contributions of 0-6% (one frame 11%). The result is clean but mostly equal
+  to the enlarged wide merge. Likely causes, untested: placement by a single
+  global position can't describe a telephoto frame whose content shifts a lot
+  with depth, and the 10% base-band tolerance rejects frames with different
+  focus. This is the main thing to improve.
+
+Costs: about 10.8 GB resident in the app after a 52 MP run (planes are 208 MB
+each and the merger holds a dozen). The app defaults to the wide merge below
+24 GB of RAM. Alignment precision is limited to the wide grid's sub-pixel fit
+(roughly 0.25-0.5 telephoto pixels); a refinement pass at telephoto scale
+would sharpen the result further.

@@ -50,6 +50,17 @@ public enum WideFusion {
         adjustments: RenderAdjustments = .none,
         progress: Progress? = nil
     ) throws -> (image: CGImage, report: FusionReport) {
+        let (planes, report) = try fusePlanes(file: file, adjustments: adjustments, progress: progress)
+        guard let image = planes.makeCGImage() else { throw ImageRendererError.renderFailed }
+        progress?("Done", 1)
+        return (image, report)
+    }
+
+    static func fusePlanes(
+        file: LRIFile,
+        adjustments: RenderAdjustments,
+        progress: Progress?
+    ) throws -> (planes: RGBPlanes, report: FusionReport) {
         let start = Date()
         guard let reference = file.referenceImage ?? file.images.first(where: { $0.cfaPattern != nil }),
               reference.cfaPattern != nil else {
@@ -89,16 +100,16 @@ public enum WideFusion {
         }
 
         progress?("Merging", (steps - 1) / steps)
-        guard let image = merger.result().makeCGImage() else { throw ImageRendererError.renderFailed }
-        progress?("Done", 1)
-        return (image, FusionReport(reference: reference.camera, frames: frames, seconds: Date().timeIntervalSince(start)))
+        let report = FusionReport(reference: reference.camera, frames: frames, seconds: Date().timeIntervalSince(start))
+        return (merger.result(), report)
     }
 }
 
 /// Accumulates aligned frames into a two-band (base + detail) weighted merge.
 struct DetailMerger {
-    /// Split between "base" (tone, colour) and "detail" (texture, edges).
-    static let bandSigma: Float = 2.5
+    /// Split between "base" (tone, colour) and "detail" (texture, edges),
+    /// in pixels of the image being merged.
+    let bandSigma: Float
     /// Relative base-band difference at which a frame's weight falls to half.
     static let ghostTolerance: Float = 0.10
 
@@ -112,17 +123,18 @@ struct DetailMerger {
     private var baseWeight: Plane
     private var detailWeight: Plane
 
-    init(reference: RGBPlanes) {
+    init(reference: RGBPlanes, bandSigma: Float = 2.5) {
         width = reference.width
         height = reference.height
+        self.bandSigma = bandSigma
         let base = RGBPlanes(
-            r: reference.r.blurred(sigma: Self.bandSigma),
-            g: reference.g.blurred(sigma: Self.bandSigma),
-            b: reference.b.blurred(sigma: Self.bandSigma))
+            r: reference.r.blurred(sigma: bandSigma),
+            g: reference.g.blurred(sigma: bandSigma),
+            b: reference.b.blurred(sigma: bandSigma))
         refBase = base
         refBaseLuma = base.luma()
 
-        let sharpness = Self.sharpness(of: reference, base: base)
+        let sharpness = Self.sharpness(of: reference, base: base, sigma: bandSigma * 1.6)
         // The reference always counts fully in the consistency sense.
         let consistency = Plane(width: width, height: height, repeating: 1)
         baseSum = RGBPlanes(r: Plane(width: width, height: height), g: Plane(width: width, height: height), b: Plane(width: width, height: height))
@@ -133,7 +145,7 @@ struct DetailMerger {
     }
 
     /// Local detail energy: blurred magnitude of the luminance detail band.
-    private static func sharpness(of image: RGBPlanes, base: RGBPlanes) -> Plane {
+    private static func sharpness(of image: RGBPlanes, base: RGBPlanes, sigma: Float) -> Plane {
         var detail = image.luma()
         let baseLuma = base.luma()
         let count = detail.data.count
@@ -146,7 +158,7 @@ struct DetailMerger {
                 }
             }
         }
-        return detail.blurred(sigma: 4)
+        return detail.blurred(sigma: sigma)
     }
 
     /// Adds one frame already resampled onto the reference grid. Returns the
@@ -156,9 +168,9 @@ struct DetailMerger {
         matchTone(&frame, valid: valid)
 
         let base = RGBPlanes(
-            r: frame.r.blurred(sigma: Self.bandSigma),
-            g: frame.g.blurred(sigma: Self.bandSigma),
-            b: frame.b.blurred(sigma: Self.bandSigma))
+            r: frame.r.blurred(sigma: bandSigma),
+            g: frame.g.blurred(sigma: bandSigma),
+            b: frame.b.blurred(sigma: bandSigma))
 
         // Consistency: how closely this frame's base band matches the
         // reference's, relative to local brightness.
@@ -180,7 +192,7 @@ struct DetailMerger {
         }
         // Erode-and-feather: take the minimum of the map and its blur so a
         // rejected area also suppresses its immediate surroundings.
-        let soft = consistency.blurred(sigma: 3)
+        let soft = consistency.blurred(sigma: bandSigma * 1.2)
         var accepted: Double = 0
         consistency.data.withUnsafeMutableBufferPointer { c in
             soft.data.withUnsafeBufferPointer { s in
@@ -191,7 +203,7 @@ struct DetailMerger {
             }
         }
 
-        let sharpness = Self.sharpness(of: frame, base: base)
+        let sharpness = Self.sharpness(of: frame, base: base, sigma: bandSigma * 1.6)
         accumulate(frame, base: base, sharpness: sharpness, consistency: consistency)
         return Float(accepted / Double(w * h))
     }

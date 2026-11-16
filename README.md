@@ -20,17 +20,17 @@ below) but not a port of any existing project's source.
 - **Colour**: uses Light's own per-lens factory calibration and the white
   balance the camera chose, through Apple's RAW pipeline (`CIRAWFilter`) via
   a DNG built from the decoded sensor data.
-- **Fusion (stage one)**: merges the lenses that share the reference lens's
-  focal length into one image, for lower noise and the sharpest detail from
-  each. It appears as "Fused" at the front of the lens strip.
+- **Fusion**: combines the lenses into one image, shown as "Fused" at the
+  front of the lens strip. "Wide merge" combines the lenses that share the
+  reference's focal length (lower noise, 13 MP). "Full detail" then adds the
+  telephoto lenses and crops to the shot's focal length, up to 52 MP.
 - **Adjust**: exposure and white balance (temperature, tint), live.
 - **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
   as JPEG, HEIC or 16-bit TIFF.
 
-**Not yet**: blending the telephoto lenses into the wide ones for a
-higher-resolution image, and depth effects. Nobody in the L16 community has
-reproduced Light's full fusion pipeline; this project is building its own in
-stages. The fused image today is 13 MP at the reference lens's field of view.
+**Not yet**: depth effects (refocusing, background blur), and reliable
+telephoto detail at close range. Nobody in the L16 community has reproduced
+Light's full fusion pipeline; this project is building its own in stages.
 
 ## Requirements
 
@@ -103,14 +103,17 @@ swift run lriprobe /path/to/file.lri
 reference camera) writes a debug preview PNG, a real DNG, and rendered
 JPEG/HEIC files. Add `--thumbs` to render a small JPEG of every colour lens,
 which is the quickest way to compare lenses side by side, or `--fuse` to
-run the lens merge and write `<name>_fused.tif` and `.jpg`.
+run the wide merge (`<name>_fused.tif`/`.jpg`), or `--fuse-tele` for the
+full-detail fusion (`<name>_fused_tele.jpg`; `--scale=2` for a smaller one).
 
 ## Known limitations
 
-- **Fusion is partial**: only same-focal-length lenses are merged. Around
-  close objects, where the lenses see different things, the extra lenses are
-  left out, so those areas look like the single reference lens.
-- **Fusion uses a lot of memory** (several GB while merging).
+- **Fusion is conservative**: a lens is left out wherever it doesn't line up
+  with the reference. Far scenes gain real resolution from the telephoto
+  lenses; at close range they mostly don't line up, so the result there is
+  close to the wide merge enlarged.
+- **Full-detail fusion needs a lot of memory** (around 10 GB at 52 MP). On
+  Macs with less than 24 GB the app starts on the wide merge.
 - **`RAW_BAYER_JPEG` pixel format is implemented but unvalidated**: it's
   coded to the documented spec, but no capture from the camera used for
   testing uses it (all use 10-bit packed), so such captures aren't rendered.

@@ -95,6 +95,29 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
         print("camera infos (hw map): \(file.cameraInfos.count)")
         print("image count: \(file.images.count)")
 
+        if CommandLine.arguments.contains("--fuse-tele") {
+            // Full fusion: wide merge plus telephoto detail, at the shot's focal length.
+            let scale = CommandLine.arguments.first { $0.hasPrefix("--scale=") }.flatMap { Float($0.dropFirst(8)) }
+            let (fused, report) = try TeleFusion.fuse(file: file, scale: scale) { message, fraction in
+                print(String(format: "  fuse %3.0f%%  %@", fraction * 100, message))
+            }
+            let base = url.deletingLastPathComponent().appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_fused_tele")
+            if let dest = CGImageDestinationCreateWithURL(base.appendingPathExtension("jpg") as CFURL, "public.jpeg" as CFString, 1, nil) {
+                CGImageDestinationAddImage(dest, fused, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+                CGImageDestinationFinalize(dest)
+            }
+            print(String(format: "full fusion: %.0f x %.0f (%.1f MP), %.2fx, %.1f s", report.outputSize.width, report.outputSize.height,
+                         Double(report.outputSize.width * report.outputSize.height) / 1e6, report.scale, report.seconds))
+            for f in report.wide.frames {
+                print(String(format: "  wide %@: accepted over %.0f%%", f.camera.label, f.coverage * 100))
+            }
+            for t in report.tiles {
+                print(String(format: "  tele %@: at (%.0f, %.0f) in the wide frame, match %.2f, detail over %.0f%% of the output",
+                             t.camera.label, t.origin.x, t.origin.y, t.placementScore, t.coverage * 100))
+            }
+            continue
+        }
+
         if CommandLine.arguments.contains("--fuse") {
             // Stage-one fusion: merge the lenses that share the reference's focal length.
             let (fused, report) = try WideFusion.fuse(file: file) { message, fraction in

@@ -26,6 +26,26 @@ final class ShotSession {
     private(set) var asShotTint: Float?
     /// What the last fusion run did (nil until one has finished).
     private(set) var fusionReport: FusionReport?
+    /// Telephoto details of the last run, when it was a full fusion.
+    private(set) var teleReport: TeleFusionReport?
+
+    /// Which merge the Fused view shows.
+    enum FusionMode: String, CaseIterable, Identifiable {
+        /// Lenses of the reference's focal length only, on its 13 MP grid.
+        case wide
+        /// Wide merge plus telephoto detail, at the shot's focal length.
+        case full
+        var id: String { rawValue }
+    }
+    /// Full fusion needs several GB of memory at 52 MP, so machines with
+    /// less than 24 GB start on the wide merge; the user can still switch.
+    var fusionMode: FusionMode = ProcessInfo.processInfo.physicalMemory >= 24 << 30 ? .full : .wide {
+        didSet { if oldValue != fusionMode, showsFused { image = nil; scheduleRender() } }
+    }
+    /// True when the shot has telephoto frames to add.
+    private(set) var canFuseFull = false
+    /// The mode actually in effect (full needs telephoto frames).
+    var effectiveFusionMode: FusionMode { canFuseFull ? fusionMode : .wide }
 
     var selectedLens: CameraID? {
         didSet { if oldValue != selectedLens, !showsFused { image = nil; scheduleRender() } }
@@ -42,11 +62,11 @@ final class ShotSession {
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     /// The last fused result at full precision, kept for export.
-    @ObservationIgnored private var fused: (image: CGImage, adjustments: RenderAdjustments)?
+    @ObservationIgnored private var fused: (image: CGImage, adjustments: RenderAdjustments, mode: FusionMode)?
 
     nonisolated static let previewDimension = 1800
     /// Fit token for the fused image (lenses use their module number).
-    static let fusedToken = -1
+    var fusedToken: Int { effectiveFusionMode == .full ? -2 : -1 }
 
     init(shot: Shot) {
         shotID = shot.id
@@ -73,6 +93,7 @@ final class ShotSession {
             self.file = file
             // Wide lenses first, then telephoto; within a group by module number.
             lenses = file.images.sorted { $0.camera.rawValue < $1.camera.rawValue }
+            canFuseFull = TeleFusion.canFuse(file)
             selectedLens = file.metadata.referenceCamera ?? lenses.first?.camera
         } catch {
             self.error = "Couldn't read \(url.lastPathComponent): \(error)"
@@ -181,19 +202,29 @@ final class ShotSession {
             do {
                 try await Task.sleep(for: .milliseconds(300))
                 guard let self, self.generation == myGeneration else { return }
-                let (float, report) = try await Task.detached(priority: .userInitiated) {
-                    try WideFusion.fuse(file: file, adjustments: adjustments) { message, _ in
-                        Task { @MainActor [weak self] in
-                            if self?.generation == myGeneration { self?.progressText = message }
-                        }
+                let mode = self.effectiveFusionMode
+                let note: WideFusion.Progress = { message, _ in
+                    Task { @MainActor [weak self] in
+                        if self?.generation == myGeneration { self?.progressText = message }
+                    }
+                }
+                let (float, report, tele) = try await Task.detached(priority: .userInitiated) { () -> (CGImage, FusionReport, TeleFusionReport?) in
+                    switch mode {
+                    case .wide:
+                        let result = try WideFusion.fuse(file: file, adjustments: adjustments, progress: note)
+                        return (result.image, result.report, nil)
+                    case .full:
+                        let result = try TeleFusion.fuse(file: file, adjustments: adjustments, progress: note)
+                        return (result.image, result.report.wide, result.report)
                     }
                 }.value
                 let display = try await Task.detached(priority: .userInitiated) {
                     try Self.displayImage(from: float)
                 }.value
                 guard self.generation == myGeneration else { return }
-                self.fused = (float, adjustments)
+                self.fused = (float, adjustments, mode)
                 self.fusionReport = report
+                self.teleReport = tele
                 self.image = display
                 self.isFullResolution = true
                 self.isWorking = false
@@ -281,9 +312,17 @@ final class ShotSession {
     func exportFused(as format: ExportFormat, to destination: URL) async throws {
         guard let file else { return }
         let adjustments = adjustments
-        let cached = fused?.adjustments == adjustments ? fused?.image : nil
+        let mode = effectiveFusionMode
+        let cached = (fused?.adjustments == adjustments && fused?.mode == mode) ? fused?.image : nil
         try await Task.detached(priority: .userInitiated) {
-            let float = try cached ?? WideFusion.fuse(file: file, adjustments: adjustments).image
+            let float: CGImage
+            if let cached {
+                float = cached
+            } else if mode == .full {
+                float = try TeleFusion.fuse(file: file, adjustments: adjustments).image
+            } else {
+                float = try WideFusion.fuse(file: file, adjustments: adjustments).image
+            }
             try Self.write(float, as: format, to: destination)
         }.value
     }

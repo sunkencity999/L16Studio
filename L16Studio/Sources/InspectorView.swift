@@ -131,24 +131,43 @@ struct LensInfoSection: View {
 }
 
 struct FusionInfoSection: View {
-    let session: ShotSession
+    @Bindable var session: ShotSession
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionHeader(title: "Fusion")
+            if session.canFuseFull {
+                Picker("Result", selection: $session.fusionMode) {
+                    Text("Wide merge").tag(ShotSession.FusionMode.wide)
+                    Text("Full detail").tag(ShotSession.FusionMode.full)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
             if let report = session.fusionReport {
+                if session.effectiveFusionMode == .full, let tele = session.teleReport {
+                    InfoRow(label: "Output", value: String(
+                        format: "%.0f × %.0f  ·  %.0f MP", tele.outputSize.width, tele.outputSize.height,
+                        Double(tele.outputSize.width * tele.outputSize.height) / 1_000_000))
+                }
                 InfoRow(label: "Reference", value: report.reference.label)
                 ForEach(report.frames, id: \.camera) { frame in
-                    InfoRow(
-                        label: frame.camera.label,
-                        value: String(format: "used in %.0f%% · shift %.0f px", frame.coverage * 100, frame.medianShift)
-                    )
+                    InfoRow(label: frame.camera.label, value: String(format: "used in %.0f%%", frame.coverage * 100))
                 }
-                InfoRow(label: "Time", value: String(format: "%.1f s", report.seconds))
+                if session.effectiveFusionMode == .full, let tele = session.teleReport {
+                    ForEach(tele.tiles, id: \.camera) { tile in
+                        InfoRow(label: "\(tile.camera.label) · tele", value: String(format: "detail in %.0f%%", tile.coverage * 100))
+                    }
+                    InfoRow(label: "Time", value: String(format: "%.1f s", tele.seconds))
+                } else {
+                    InfoRow(label: "Time", value: String(format: "%.1f s", report.seconds))
+                }
             } else {
                 Text("Merging…").font(.callout).foregroundStyle(.secondary)
             }
-            Text("Lenses with the same focal length are aligned to the reference and merged: lower noise, and the sharpest detail from each. A lens is left out wherever it doesn't line up, such as around close objects.")
+            Text(session.effectiveFusionMode == .full
+                 ? "The wide lenses are merged and cropped to the shot's focal length, then each telephoto lens adds finer detail where it lines up. Far scenes gain the most; close objects mostly fall back to the wide merge."
+                 : "Lenses with the same focal length are aligned to the reference and merged: lower noise, and the sharpest detail from each. A lens is left out wherever it doesn't line up, such as around close objects.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

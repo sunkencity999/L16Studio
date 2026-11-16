@@ -28,8 +28,7 @@ struct ViewerView: View {
             Text(session.url.deletingPathExtension().lastPathComponent)
                 .font(.headline)
             if session.showsFused {
-                let lenses = session.fusableLenses
-                Text("Fused  ·  \(lenses.count) lenses  ·  \(lenses.first?.camera.focalLength ?? 0) mm")
+                Text(fusedTitle)
                     .font(.callout)
                     .foregroundStyle(Theme.accent)
             } else if let lens = session.selectedImage {
@@ -50,6 +49,15 @@ struct ViewerView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .background(Theme.panel)
+    }
+
+    private var fusedTitle: String {
+        let wide = session.fusableLenses.count
+        if session.effectiveFusionMode == .full, let tele = session.teleReport {
+            let megapixels = Double(tele.outputSize.width * tele.outputSize.height) / 1_000_000
+            return String(format: "Fused  ·  %d wide + %d tele lenses  ·  %.0f MP", wide, tele.tiles.count, megapixels)
+        }
+        return "Fused  ·  \(wide) lenses  ·  \(session.fusableLenses.first?.camera.focalLength ?? 0) mm"
     }
 
     private var statusText: String {
@@ -73,8 +81,11 @@ struct ViewerView: View {
             } else if let image = session.image, let lens = session.selectedImage {
                 ZoomableImageView(
                     image: image,
-                    nominalSize: CGSize(width: lens.width, height: lens.height),
-                    fitToken: session.showsFused ? ShotSession.fusedToken : lens.camera.rawValue
+                    // The fused image has its own size (up to 52 MP).
+                    nominalSize: session.showsFused
+                        ? CGSize(width: image.width, height: image.height)
+                        : CGSize(width: lens.width, height: lens.height),
+                    fitToken: session.showsFused ? session.fusedToken : lens.camera.rawValue
                 )
             } else {
                 ProgressView(session.showsFused ? (session.progressText ?? "Fusing…") : "Developing…")
