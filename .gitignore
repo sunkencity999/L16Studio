@@ -5,8 +5,4 @@ xcuserdata/
 DerivedData/
 test-data/
 reference/
-
-# xcodegen regenerates these deterministically from project.yml -- run
-# `xcodegen generate` after cloning rather than committing generated output.
-L16Studio.xcodeproj/
-L16Studio/Info.plist
+build/

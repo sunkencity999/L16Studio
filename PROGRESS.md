@@ -57,25 +57,40 @@ to reimplement demosaicing ourselves. This also means most of task #18 (DNG
 export) is already done as a side effect of building this.
 
 **Validated against real data**: `CIRAWFilter` accepted our hand-written DNG
-and rendered a full 4160x3120 color image with clean, alias-free demosaicing
--- this conclusively proves the CFA-pattern-from-`sensor_bayer_red_override`
-logic (`CFAPattern.swift`) is correct, since a wrong CFA guess produces
-obvious checkerboard/moire artifacts, not clean edges.
+and rendered a full 4160x3120 color image with clean, alias-free demosaicing.
+(That only proved the green sites were right -- a red/blue swap also
+demosaics cleanly. See the colour section below.)
 
-**Known open issue -- color accuracy**: Light's own calibration matrices
-(`forwardMatrix`/`colorMatrix` from `ColorInfo`) produce a heavily saturated
-green cast when fed to `CIRAWFilter` as `ColorMatrix1`, tried both directly
-and inverted. Likely cause: those matrices were calibrated for Light's own
-proprietary `CIAPI`/`libcp` rendering pipeline (see the LRI-format research
-summary), not for DNG's specific colorimetric convention -- may need a
-different combination/normalization than DNG expects. A generic sRGB D65
-XYZ->camera matrix produces a far more plausible (if not color-accurate)
-result and is the current default. Also: `CIRAWFilter` appears to ignore our
-`AsShotNeutral` tag entirely (real calibration values vs. identity produced
-near-identical renders) -- needs investigation, possibly a `CIRAWFilter`
-option needs to be set explicitly. Both are documented inline in
-`DNGWriter.swift`'s doc comment. Real photos, not accurate colors yet --
-appropriate for continued iteration, not a v1 blocker.
+**Colour accuracy -- fixed 2026-11-16.** Verified on a fresh shot against
+the camera's own JPEG of the same frame, across all nine colour modules. The
+"green cast" was four separate bugs, none of them in Light's calibration:
+
+1. `unpackTenBit` (a faithful port of the reference decoder) returns the frame
+   in *reversed* pixel order. That rotates the picture 180 degrees and shifts
+   the Bayer phase by one in both axes. `unpackTenBitFrame` now restores
+   readout order; `RawImage.unpackedSamples()` uses it.
+2. The CFA table mixed two conventions. The rule is simply: `sensor_bayer_red_
+   override` is the (x, y) of the red site in the 2x2 tile, in readout order
+   -- (0,0)=RGGB, (1,0)=GRBG, (0,1)=GBRG, (1,1)=BGGR.
+3. DNG tag numbers were off by one: the neutral went into `AsShotWhiteXY`
+   (50729) and identity `AnalogBalance` into `AsShotNeutral` (50728), so every
+   file said "neutral = 1,1,1". Correct tags: 50727 AnalogBalance, 50728
+   AsShotNeutral, 50730 BaselineExposure. This is why `CIRAWFilter` appeared to
+   ignore the neutral.
+4. Light's matrices are in standard DNG form after all: `colorMatrix` is an
+   XYZ->camera ColorMatrix, `forwardMatrix` a ForwardMatrix (rows sum to the
+   D50 white), and `rgRatio`/`bgRatio` are R/G and B/G of a neutral under that
+   illuminant (inv(ColorMatrix_D65) x (rg,1,bg) lands on D65). The DNG now
+   carries the A and D65 pairs as calibration 1 and 2.
+
+Also new: the shot's own `awb_gains` set `AsShotNeutral` (reciprocal of the
+gains), and `BaselineExposure` = log2(image_gain / (module analog x digital
+gain)) -- the reference module is captured at half the gain of the others.
+
+**Still open:** mono module (A2) has no DNG path (it renders as grey in the
+app), and BayerJPEG captures are unimplemented. An earlier note here said B1
+came out rotated; on later shots every telephoto frame is upright, so that
+was a misreading of one busy frame.
 
 ## Tools
 
@@ -84,34 +99,99 @@ appropriate for continued iteration, not a v1 blocker.
   min/max/mean, and (for the reference camera) writes a debug preview PNG,
   a real DNG, and a `CIRAWFilter`-rendered PNG from that DNG.
 
-## SwiftUI app shell (task #19, 2026-07-29)
+## App rebuild (2026-11-16)
 
-A real, native macOS app (`L16Studio.app`), project generated via `xcodegen`
-(`project.yml` is the source of truth -- run `xcodegen generate` after
-cloning; `.xcodeproj` and the generated `Info.plist` are gitignored). Views:
-`ContentView` (sidebar + drag-and-drop import), `ShotGalleryView` (per-shot
-metadata header + thumbnail grid), `CaptureThumbnailView` (async fast-draft
-render per tile), `CaptureDetailView` (full-res render + export menu).
+The original app shell (sidebar of files + per-file gallery + modal detail)
+was replaced. It is now a SwiftPM executable (`Package.swift`, sources in
+`L16Studio/Sources`) wrapped into a bundle by `scripts/build-app.sh`; the
+XcodeGen project is gone. `xcodebuild` is not needed, only Xcode's toolchain
+(`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build`),
+because SwiftUI's macros don't ship with Command Line Tools.
 
-**Fully validated end-to-end through the actual built app**, not just the
-CLI tool -- launched it, imported a real `.lri` file via File > Open,
-confirmed the gallery showed the correct capture count (9 of 10, correctly
-excluding the mono module) and metadata (56mm, 9 lenses), opened a capture's
-detail view (full-res debayer), and exported a real JPEG via the Export
-menu's save panel -- verified the resulting file on disk is a valid
-4160x3120 JPEG.
+- `Library.swift` -- `LibraryStore`: JSON index in Application Support, flags,
+  ratings, filters. Disk imports are referenced in place.
+- `Thumbnailer.swift` -- serialised preview rendering with memory + disk cache.
+- `ShotSession.swift` -- one open shot: a `LensRenderer` per lens, a quick
+  preview render followed by full resolution once input settles, export.
+- `LRIKit/LensRenderer.swift` -- keeps the `CIRAWFilter` per lens so exposure
+  and white-balance changes don't re-unpack; renders the mono module (A2) as
+  linear grey.
+- `CameraLink.swift` + `CameraImportView.swift` -- camera import over MTP by
+  driving the libmtp CLI tools (`mtp-files`, `mtp-getfile`). The stock camera
+  exposes no storage in PTP mode, so ImageCaptureCore is not an option, and
+  macOS has no native MTP. Sessions opened immediately after another one
+  closes can fail with "No devices"; `download` retries.
+- Views: `RootView` (split view + sidebar), `LibraryGridView`, `ViewerView`
+  (zoomable canvas + lens strip), `InspectorView` (info, adjust, export).
 
-**Bug found and fixed during this validation**: `.lri` isn't a
-system-registered UTType, so `UTType(filenameExtension: "lri")` silently
-failed and the Open panel's file filter showed everything (not nothing).
-Fixed by declaring a proper `UTImportedTypeDeclarations` entry in
-`project.yml` (`dev.sunkencity.L16Studio.lri`) and referencing that type
-identifier directly in `LibraryModel.swift` -- confirmed fixed by checking
-Documents (showed all files greyed out except `.lri`) and navigating
-directly to a real `.lri` file (showed enabled, with a proper "Light L...
-Image" kind label).
+Verified by running the built app: opening a file from the command line
+imports and opens it; the grid, viewer, lens strip (all ten lenses including
+mono), inspector, and the Fused view (selected with the arrow key) render
+correctly. Not yet exercised through the UI: camera import sheet, export
+buttons, multi-selection actions. The 16-bit TIFF conversion used by fused
+export was tested separately.
 
-**Known limitations carried over from earlier tasks, not fixed here**: color
-accuracy (generic sRGB matrix placeholder, not Light's own calibration) and
-BayerJPEG-format captures (excluded from the gallery via `renderableImages`
-filtering) -- both documented in `ImageRenderer.swift`/`DNGWriter.swift`.
+Gotchas hit: launching *by* opening a file created no window with
+`WindowGroup` + `onOpenURL` (fixed with an app delegate), and then two windows
+(fixed by using a single `Window` scene). Screenshots of the app look yellower
+than the image really is because they're in the display's profile; convert to
+sRGB before judging colour.
+
+## Fusion, stage one: same-focal-length merge (2026-11-16)
+
+`WideFusion.fuse` (`LRIKit/Sources/LRIKit/Fusion*.swift`) merges every colour
+lens that shares the reference lens's focal length. On a 35 mm shot that is
+A1 (reference) + A3, A4, A5. About 1.7 s per shot in a release build.
+
+How a 35 mm shot is laid out (seen on four test shots): the five A modules
+(28 mm) each see the whole scene from a few centimetres apart and are focused
+at *different distances*; the five B modules (70 mm) tile the middle of the
+scene. The camera's own JPEG is the 35 mm crop.
+
+Pipeline:
+1. Each lens is rendered through `CIRAWFilter` to linear float RGB
+   (`LensRenderer.renderLinear`).
+2. `TileAligner`: coarse-to-fine block matching on a sqrt-luma pyramid.
+   Exhaustive +/-16 search at the coarsest level (about +/-512 px at full
+   size), +/-2 refinement per level, 32 px tiles at full resolution,
+   mean-removed SAD, parabola sub-pixel fit. Shifts between A modules reach
+   700+ px on close-ups.
+3. Confidence-weighted diffusion: tiles with no texture (judged against the
+   image's own noise floor) take their displacement from textured neighbours.
+4. `TileField.warp`: bilinear-interpolated displacements, Catmull-Rom sampling.
+5. `TileField.reliability`: distrust wherever the field *bends* (second
+   difference > ~2.5 px between tiles).
+6. `DetailMerger`: low-frequency tone match to the reference, then a two-band
+   merge. Weights = consistency with the reference's base band x local detail
+   energy (squared for the detail band), so a defocused lens can't soften a
+   sharp one and equal-sharpness areas average (noise reduction).
+
+What went wrong on the way, so it isn't repeated:
+- Apple's `VNGenerateOpticalFlowRequest` is not usable for registration: on a
+  synthetic 12 px / 5 px shift it reported 5.3 / 2.35 (and 6.5 / 2.6 at
+  `.veryHigh`), uniformly. Convention, for the record: handler image A,
+  targeted image B, flow = where A's content went in B, +y down.
+- Without step 5, warped creases around out-of-focus foreground objects were
+  taken for sharp detail and dominated the merge.
+- Measuring field roughness by *first* differences rejected whole receding
+  surfaces (a desk: the shift legitimately changes ~5 px per tile). Second
+  differences fixed that. Without step 3, plain walls were rejected because
+  their tiles matched noise.
+
+Results (share of the frame where each extra lens contributed): room shot
+61-69%, near-to-far shot 35-45%, keyboard close-up 20-30%. Checked at 100%
+against the single reference lens: clearly lower noise, same detail, no
+ghosting or creases in the regions inspected. Not measured numerically.
+
+Open:
+- Exposure: `baselineExposure` now includes exposure time (modules in one
+  shot differ in both gain and time). On shot 3 that renders A1 about a stop
+  brighter than the camera's JPEG; the camera may deliberately underexpose
+  the reference. Unresolved which is "right".
+- Next stage: bring the B (70 mm) tiles in for resolution, and output the
+  35 mm crop the camera intends. That needs cross-scale registration; the
+  geometric calibration in the file should give the starting transform.
+- Memory: the app reached ~3.4 GB RSS after a fusion.
+- Mono module (A2) is not merged yet; it should help luminance noise.
+- Shot 1 looked as if B1 were rotated relative to the other telephoto frames;
+  on shots 2-4 every telephoto frame is upright, so that was a misreading.

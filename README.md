@@ -12,25 +12,33 @@ below) but not a port of any existing project's source.
 
 ## What it does
 
-- Opens `.lri` files and lists every capture inside (the L16 fires all 10
-  active lens modules — sometimes more in an HDR burst — into one file)
-- Shows per-shot metadata: focal length, lens/module count, per-camera CFA
-  and calibration info
-- Renders full-resolution previews using Apple's own RAW pipeline
-  (`CIRAWFilter`) via a hand-rolled DNG container built from the decoded
-  sensor data — no custom demosaic code to maintain
-- Exports any capture to DNG, JPEG, or HEIC
+- **Library**: imports `.lri` shots into a browsable grid with flags, star
+  ratings and filters. Files on disk are referenced where they are.
+- **Camera import**: pulls shots straight off an L16 plugged in over USB.
+- **Viewer**: every lens the camera fired for a shot (the L16 fires 10 of
+  its 16 modules per shot) in a filmstrip, with native zoom and pan.
+- **Colour**: uses Light's own per-lens factory calibration and the white
+  balance the camera chose, through Apple's RAW pipeline (`CIRAWFilter`) via
+  a DNG built from the decoded sensor data.
+- **Fusion (stage one)**: merges the lenses that share the reference lens's
+  focal length into one image, for lower noise and the sharpest detail from
+  each. It appears as "Fused" at the front of the lens strip.
+- **Adjust**: exposure and white balance (temperature, tint), live.
+- **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
+  as JPEG, HEIC or 16-bit TIFF.
 
-**Out of scope for v1**: true 16-lens computational fusion (super-resolution
-zoom, HDR merge, depth-based effects). Nobody in the L16 community —
-including the most active reverse-engineering projects — has cracked
-Light's fusion pipeline. L16Studio's goal is to be a great single-shot RAW
-viewer/converter, not to reimplement Light's cloud processing.
+**Not yet**: blending the telephoto lenses into the wide ones for a
+higher-resolution image, and depth effects. Nobody in the L16 community has
+reproduced Light's full fusion pipeline; this project is building its own in
+stages. The fused image today is 13 MP at the reference lens's field of view.
 
 ## Requirements
 
 - macOS 14 (Sonoma) or later
-- Xcode 15+ (full Xcode, not just Command Line Tools — needed to build)
+- Xcode 15+ installed (its toolchain compiles SwiftUI). It does not need to
+  be the selected developer directory or set up beyond installing it.
+- For camera import: `brew install libmtp` (macOS has no built-in support
+  for the file-transfer protocol the camera uses)
 
 ## Install
 
@@ -40,15 +48,10 @@ cd L16Studio
 ./install.sh
 ```
 
-This will:
-1. Install [XcodeGen](https://github.com/yonaskolb/XcodeGen) via Homebrew if
-   it isn't already present
-2. Generate the Xcode project from `project.yml`
-3. Build a Release configuration of the app
-4. Install `L16Studio.app` to `/Applications`
-5. Install an `l16studio` command-line launcher to the first writable
-   directory on your `PATH` (`/opt/homebrew/bin`, `/usr/local/bin`, or
-   `~/.local/bin`)
+This builds the app with the Swift toolchain, installs `L16Studio.app` to
+`/Applications`, and installs an `l16studio` command-line launcher to the
+first writable directory on your `PATH` (`/opt/homebrew/bin`,
+`/usr/local/bin`, or `~/.local/bin`).
 
 ## Usage
 
@@ -56,27 +59,34 @@ Launch from Spotlight/Finder like any other app, or from the terminal:
 
 ```sh
 l16studio                              # launch the app
-l16studio path/to/photo.lri            # launch and import a file directly
+l16studio path/to/photo.lri            # launch, import and open a file
 ```
 
 Double-clicking a `.lri` file in Finder (or "Open With → L16Studio") works
 the same way, since `.lri` is registered as a document type.
 
-Inside the app: drag `.lri` files onto the window, or use **File → Open…**
-(⌘O). Select a capture in the gallery to view it full-resolution, then use
-the export menu to save as DNG/JPEG/HEIC.
+Inside the app:
+
+- Drag `.lri` files or folders onto the window, or **File → Import…** (⌘I).
+- **File → Import from Camera…** (⇧⌘I): plug the L16 in directly (not through
+  a hub), wake it, and set its USB mode to file transfer.
+- Double-click a shot to open it. Left/right arrows change lens, Esc returns
+  to the library, double-click the image to switch between fit and 100%.
+- Adjustments and export are in the inspector on the right (⌥⌘I).
+
+Imported camera shots are stored in `~/Pictures/L16 Studio`. The library
+index lives in `~/Library/Application Support/L16Studio`.
 
 ## Building from source (without install.sh)
 
 ```sh
-brew install xcodegen
-xcodegen generate
-xcodebuild -project L16Studio.xcodeproj -scheme L16Studio -configuration Release build
+scripts/build-app.sh          # -> build/L16Studio.app
+swift build                   # just compile (set DEVELOPER_DIR to Xcode's
+                              # Developer folder if only CLT is selected)
 ```
 
-The `.xcodeproj` and `L16Studio/Info.plist` are generated artifacts (gitignored)
-— `project.yml` is the single source of truth. Re-run `xcodegen generate`
-after pulling changes that touch it.
+There is no Xcode project: the app is a SwiftPM executable (`Package.swift`)
+and `scripts/build-app.sh` assembles the bundle, icon and `Info.plist`.
 
 ### LRIKit
 
@@ -90,36 +100,33 @@ swift run lriprobe /path/to/file.lri
 ```
 
 `lriprobe` prints per-capture metadata, unpacks pixel data, and (for the
-reference camera) writes a debug preview PNG, a real DNG, and a
-`CIRAWFilter`-rendered PNG — useful for debugging the format itself
-independent of the SwiftUI app.
+reference camera) writes a debug preview PNG, a real DNG, and rendered
+JPEG/HEIC files. Add `--thumbs` to render a small JPEG of every colour lens,
+which is the quickest way to compare lenses side by side, or `--fuse` to
+run the lens merge and write `<name>_fused.tif` and `.jpg`.
 
 ## Known limitations
 
-- **Color accuracy**: Light's own calibration matrices (per-shot
-  `ColorMatrix`/`ForwardMatrix`) don't map cleanly onto DNG's colorimetric
-  conventions when fed to `CIRAWFilter` — they currently produce a heavy
-  green cast, so a generic sRGB D65 matrix is used instead. Renders are
-  correct in structure (no demosaic artifacts) but not color-accurate to
-  the original scene yet. See `LRIKit/Sources/LRIKit/DNGWriter.swift` and
-  `PROGRESS.md` for details.
+- **Fusion is partial**: only same-focal-length lenses are merged. Around
+  close objects, where the lenses see different things, the extra lenses are
+  left out, so those areas look like the single reference lens.
+- **Fusion uses a lot of memory** (several GB while merging).
 - **`RAW_BAYER_JPEG` pixel format is implemented but unvalidated**: it's
-  coded to the documented spec, but no real capture on the camera unit
-  used for testing produces this format (all captures use the more common
-  10-bit packed format), so the plane-to-CFA-position assembly is a
-  best-guess pending a real sample.
+  coded to the documented spec, but no capture from the camera used for
+  testing uses it (all use 10-bit packed), so such captures aren't rendered.
 
 Full technical notes and validation history are in `PROGRESS.md`.
 
 ## Project layout
 
 ```
-L16Studio/          SwiftUI app (views, view models)
-LRIKit/              Standalone Swift package: .lri parsing, debayer/DNG
-                     pipeline, lriprobe CLI
+Package.swift        The app as a SwiftPM executable
+L16Studio/           SwiftUI app (library, viewer, inspector, camera import)
+LRIKit/              Standalone Swift package: .lri parsing, DNG/colour
+                     pipeline, lens renderer, lriprobe CLI
+scripts/build-app.sh Builds and assembles L16Studio.app
+install.sh           Build + install to /Applications, plus CLI launcher
 icon-gen/            CoreGraphics app-icon generator (kept for regeneration)
-install.sh           Build + install script
-project.yml          XcodeGen project spec (source of truth for the .xcodeproj)
 ```
 
 ## Attribution

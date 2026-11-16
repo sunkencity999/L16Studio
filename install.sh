@@ -8,42 +8,13 @@ APP_NAME="L16Studio"
 CLI_NAME="l16studio"
 CLI_DIRS=("/opt/homebrew/bin" "/usr/local/bin" "$HOME/.local/bin")
 
-echo "==> Checking prerequisites"
-
-if ! xcodebuild -version >/dev/null 2>&1; then
-    echo "error: full Xcode isn't active (only Command Line Tools?)." >&2
-    echo "  Install Xcode from the App Store, then run:" >&2
-    echo "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
-    echo "  sudo xcodebuild -license accept" >&2
+if [ ! -d /Applications/Xcode.app ] && ! xcodebuild -version >/dev/null 2>&1; then
+    echo "error: Xcode isn't installed. Its toolchain is needed to compile SwiftUI." >&2
+    echo "  Install Xcode from the App Store, then re-run this script." >&2
     exit 1
 fi
 
-if ! command -v xcodegen >/dev/null 2>&1; then
-    if command -v brew >/dev/null 2>&1; then
-        echo "==> Installing xcodegen (via Homebrew)"
-        brew install xcodegen
-    else
-        echo "error: xcodegen not found and Homebrew isn't installed." >&2
-        echo "  Install Homebrew (https://brew.sh) or xcodegen manually, then re-run." >&2
-        exit 1
-    fi
-fi
-
-echo "==> Generating Xcode project"
-xcodegen generate
-
-echo "==> Building $APP_NAME (Release)"
-xcodebuild -project "$APP_NAME.xcodeproj" -scheme "$APP_NAME" -configuration Release build
-
-BUILT_APP=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "${APP_NAME}-*" -print -quit)/Build/Products/Release/$APP_NAME.app
-if [ ! -d "$BUILT_APP" ]; then
-    echo "error: couldn't find the built app at expected path: $BUILT_APP" >&2
-    exit 1
-fi
-
-echo "==> Installing $APP_NAME.app to /Applications"
-rm -rf "/Applications/$APP_NAME.app"
-cp -R "$BUILT_APP" "/Applications/$APP_NAME.app"
+scripts/build-app.sh --install
 xattr -dr com.apple.quarantine "/Applications/$APP_NAME.app" 2>/dev/null || true
 
 echo "==> Installing CLI launcher ('$CLI_NAME')"
