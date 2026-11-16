@@ -88,7 +88,7 @@ public enum WideFusion {
             var (warped, valid) = field.warp(source)
             let trust = field.reliability(width: valid.width, height: valid.height)
             for i in 0..<valid.data.count { valid.data[i] *= trust.data[i] }
-            let coverage = merger.add(warped, valid: valid)
+            let coverage = merger.add(&warped, valid: valid)
 
             let magnitudes = zip(field.dx, field.dy).map { ($0 * $0 + $1 * $1).squareRoot() }.sorted()
             frames.append(.init(
@@ -110,12 +110,14 @@ struct DetailMerger {
     /// Split between "base" (tone, colour) and "detail" (texture, edges),
     /// in pixels of the image being merged.
     let bandSigma: Float
+    private static let toneFactor = 16
     /// Relative base-band difference at which a frame's weight falls to half.
     let ghostTolerance: Float
 
     private let width: Int
     private let height: Int
-    private let refBase: RGBPlanes
+    /// The reference's base band at 1/16 size, for tone matching.
+    private let refBaseSmall: RGBPlanes
     private let refBaseLuma: Plane
 
     private var baseSum: RGBPlanes
@@ -132,7 +134,10 @@ struct DetailMerger {
             r: reference.r.blurred(sigma: bandSigma),
             g: reference.g.blurred(sigma: bandSigma),
             b: reference.b.blurred(sigma: bandSigma))
-        refBase = base
+        refBaseSmall = RGBPlanes(
+            r: base.r.downsampled(by: Self.toneFactor).blurred(sigma: 2),
+            g: base.g.downsampled(by: Self.toneFactor).blurred(sigma: 2),
+            b: base.b.downsampled(by: Self.toneFactor).blurred(sigma: 2))
         refBaseLuma = base.luma()
 
         let sharpness = Self.sharpness(of: reference, base: base, sigma: bandSigma * 1.6)
@@ -168,8 +173,8 @@ struct DetailMerger {
     /// `detailOnly`: the frame contributes texture but no tone. Used for
     /// telephoto frames, which cover only part of the picture: letting them
     /// shift the base band would leave a visible step at their borders.
-    mutating func add(_ frame: RGBPlanes, valid: Plane, detailOnly: Bool = false) -> Float {
-        var frame = frame
+    mutating func add(_ frame: inout RGBPlanes, valid: Plane, detailOnly: Bool = false) -> Float {
+        // Tone-matched in place: the caller's copy is modified, not duplicated.
         matchTone(&frame, valid: valid)
 
         let base = RGBPlanes(
@@ -216,13 +221,11 @@ struct DetailMerger {
     /// Matches the frame's low-frequency brightness and colour to the
     /// reference (modules differ slightly in exposure, vignetting and tint).
     private func matchTone(_ frame: inout RGBPlanes, valid: Plane) {
-        let factor = 16
         func gain(_ channel: Plane, _ reference: Plane) -> Plane {
-            let a = reference.downsampled(by: factor).blurred(sigma: 2)
-            let b = channel.downsampled(by: factor).blurred(sigma: 2)
-            var ratio = Plane(width: a.width, height: a.height)
+            let b = channel.downsampled(by: Self.toneFactor).blurred(sigma: 2)
+            var ratio = Plane(width: reference.width, height: reference.height)
             for i in 0..<ratio.data.count {
-                ratio.data[i] = min(2, max(0.5, (a.data[i] + 0.002) / (b.data[i] + 0.002)))
+                ratio.data[i] = min(2, max(0.5, (reference.data[i] + 0.002) / (b.data[i] + 0.002)))
             }
             return ratio.resized(width: channel.width, height: channel.height)
         }
@@ -236,10 +239,9 @@ struct DetailMerger {
                 }
             }
         }
-        // Use the reference's own (unblurred) planes via its base at this scale.
-        apply(&frame.r, gain(frame.r, refBase.r))
-        apply(&frame.g, gain(frame.g, refBase.g))
-        apply(&frame.b, gain(frame.b, refBase.b))
+        apply(&frame.r, gain(frame.r, refBaseSmall.r))
+        apply(&frame.g, gain(frame.g, refBaseSmall.g))
+        apply(&frame.b, gain(frame.b, refBaseSmall.b))
     }
 
     private mutating func accumulate(_ image: RGBPlanes, base: RGBPlanes, sharpness: Plane, consistency: Plane, includeBase: Bool) {
@@ -280,23 +282,29 @@ struct DetailMerger {
         }}}}}}}}
     }
 
-    func result() -> RGBPlanes {
+    /// Finishes the merge. Consumes the accumulators (the result is written
+    /// over the base sums), so the merger can't be used afterwards.
+    mutating func result() -> RGBPlanes {
         let w = width, h = height
-        func channel(_ bSum: Plane, _ dSum: Plane) -> Plane {
-            var out = Plane(width: w, height: h)
-            bSum.data.withUnsafeBufferPointer { bs in
+        func finish(_ bSum: inout Plane, _ dSum: Plane) {
+            bSum.data.withUnsafeMutableBufferPointer { bs in
             dSum.data.withUnsafeBufferPointer { ds in
             baseWeight.data.withUnsafeBufferPointer { bw in
             detailWeight.data.withUnsafeBufferPointer { dw in
-            out.data.withUnsafeMutableBufferPointer { o in
                 parallelRows(h) { rows in
                     for i in (rows.lowerBound * w)..<(rows.upperBound * w) {
-                        o[i] = bs[i] / bw[i] + ds[i] / dw[i]
+                        bs[i] = bs[i] / bw[i] + ds[i] / dw[i]
                     }
                 }
-            }}}}}
-            return out
+            }}}}
         }
-        return RGBPlanes(r: channel(baseSum.r, detailSum.r), g: channel(baseSum.g, detailSum.g), b: channel(baseSum.b, detailSum.b))
+        finish(&baseSum.r, detailSum.r); detailSum.r = Plane(width: 0, height: 0)
+        finish(&baseSum.g, detailSum.g); detailSum.g = Plane(width: 0, height: 0)
+        finish(&baseSum.b, detailSum.b); detailSum.b = Plane(width: 0, height: 0)
+        let out = baseSum
+        baseSum = RGBPlanes(r: Plane(width: 0, height: 0), g: Plane(width: 0, height: 0), b: Plane(width: 0, height: 0))
+        baseWeight = Plane(width: 0, height: 0)
+        detailWeight = Plane(width: 0, height: 0)
+        return out
     }
 }

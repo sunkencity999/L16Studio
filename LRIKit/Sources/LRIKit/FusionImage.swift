@@ -93,29 +93,32 @@ struct RGBPlanes {
         return out
     }
 
-    /// A 32-bit float CGImage in linear Display P3.
+    /// A 32-bit float CGImage in linear Display P3. The pixel buffer is
+    /// handed to Core Graphics without copying (at 52 MP it is 830 MB).
     func makeCGImage() -> CGImage? {
         let w = width, h = height
-        var pixels = [Float](repeating: 1, count: w * h * 4)
+        let count = w * h * 4
+        let pixels = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        let dst = UnsafeMutableBufferPointer(start: pixels, count: count)
         r.data.withUnsafeBufferPointer { rp in
             g.data.withUnsafeBufferPointer { gp in
                 b.data.withUnsafeBufferPointer { bp in
-                    pixels.withUnsafeMutableBufferPointer { dst in
-                        parallelRows(h) { rows in
-                            for y in rows {
-                                var i = y * w
-                                var d = i * 4
-                                for _ in 0..<w {
-                                    dst[d] = rp[i]; dst[d + 1] = gp[i]; dst[d + 2] = bp[i]
-                                    i += 1; d += 4
-                                }
+                    parallelRows(h) { rows in
+                        for y in rows {
+                            var i = y * w
+                            var d = i * 4
+                            for _ in 0..<w {
+                                dst[d] = rp[i]; dst[d + 1] = gp[i]; dst[d + 2] = bp[i]; dst[d + 3] = 1
+                                i += 1; d += 4
                             }
                         }
                     }
                 }
             }
         }
-        let data = pixels.withUnsafeBufferPointer { Data(buffer: $0) }
+        let data = Data(bytesNoCopy: pixels, count: count * MemoryLayout<Float>.size, deallocator: .custom { pointer, _ in
+            pointer.assumingMemoryBound(to: Float.self).deallocate()
+        })
         guard let provider = CGDataProvider(data: data as CFData),
               let space = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3) else { return nil }
         let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue

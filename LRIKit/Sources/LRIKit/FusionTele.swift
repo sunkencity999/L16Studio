@@ -128,11 +128,11 @@ public enum TeleFusion {
 
             // 3. Resample the full-resolution telephoto frame onto the canvas.
             progress?("Merging \(lens.camera.label)", fraction + 0.35 / Double(plan.tele.count))
-            let (warped, valid) = Resampler.warpTele(
+            var (warped, valid) = Resampler.warpTele(
                 source, onto: canvas, field: field, trust: trust,
                 placement: placement, magnification: plan.magnification,
                 cropX: cropX, cropY: cropY, scale: scale)
-            let coverage = merger.add(warped, valid: valid, detailOnly: true)
+            let coverage = merger.add(&warped, valid: valid, detailOnly: true)
             tiles.append(.init(
                 camera: lens.camera,
                 origin: CGPoint(x: CGFloat(placement.x), y: CGFloat(placement.y)),
