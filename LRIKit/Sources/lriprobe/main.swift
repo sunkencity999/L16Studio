@@ -112,8 +112,8 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
                 print(String(format: "  wide %@: accepted over %.0f%%", f.camera.label, f.coverage * 100))
             }
             for t in report.tiles {
-                print(String(format: "  tele %@: at (%.0f, %.0f) in the wide frame, match %.2f, detail over %.0f%% of the output",
-                             t.camera.label, t.origin.x, t.origin.y, t.placementScore, t.coverage * 100))
+                print(String(format: "  tele %@: at (%.0f, %.0f) in the wide frame, match %.2f, alignment trusted in %.0f%% of its footprint, detail over %.0f%% of the output",
+                             t.camera.label, t.origin.x, t.origin.y, t.placementScore, t.aligned * 100, t.coverage * 100))
             }
             continue
         }

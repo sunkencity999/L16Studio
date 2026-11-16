@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 
 /// What the full (wide + telephoto) fusion did.
 public struct TeleFusionReport: Sendable {
@@ -10,6 +11,9 @@ public struct TeleFusionReport: Sendable {
         public let origin: CGPoint
         /// Match quality of that placement, -1...1 (normalised correlation).
         public let placementScore: Float
+        /// Share of the frame's footprint where the alignment was trusted
+        /// (before the merge's own consistency check).
+        public let aligned: Float
         /// Share of the output picture this lens contributed detail to.
         public let coverage: Float
     }
@@ -89,7 +93,11 @@ public enum TeleFusion {
 
         // The enlarged wide image carries nothing finer than about `scale`
         // pixels, so that is where "base" ends and "detail" begins.
-        var merger = DetailMerger(reference: canvas, bandSigma: max(2, 1.6 * scale))
+        // The tolerance is tighter than in the wide merge: a telephoto frame
+        // only adds detail, so a sliver of it that the wide image doesn't
+        // corroborate shows up as a stray line on a plain surface.
+        let tolerance = ProcessInfo.processInfo.environment["L16_FUSION_TELE_TOL"].flatMap(Float.init) ?? 0.04
+        var merger = DetailMerger(reference: canvas, bandSigma: max(2, 1.6 * scale), ghostTolerance: tolerance)
 
         var tiles: [TeleFusionReport.Tile] = []
         for (index, lens) in plan.tele.enumerated() {
@@ -106,7 +114,17 @@ public enum TeleFusion {
             let (pasted, footprint) = TelePlacement.paste(tele: teleLuma, into: wideLuma, at: placement, magnification: plan.magnification)
             let field = TileAligner.align(reference: wideLuma, target: pasted).smoothed()
             var trust = field.reliabilityGrid()
-            for i in 0..<trust.data.count { trust.data[i] *= footprint.data[i] }
+            var inside: Float = 0, trusted: Float = 0
+            for i in 0..<trust.data.count {
+                trust.data[i] *= footprint.data[i]
+                inside += footprint.data[i]; trusted += trust.data[i]
+            }
+            if let dir = ProcessInfo.processInfo.environment["L16_FUSION_DEBUG"] {
+                // Diagnostic dumps: the pasted placement and the trust grid.
+                FusionDebug.write(pasted, to: "\(dir)/\(lens.camera.label)_pasted.png", scaleDown: 4)
+                FusionDebug.write(trust, to: "\(dir)/\(lens.camera.label)_trust.png", scaleDown: 1)
+                if index == 0 { FusionDebug.write(wideLuma, to: "\(dir)/wide.png", scaleDown: 4) }
+            }
 
             // 3. Resample the full-resolution telephoto frame onto the canvas.
             progress?("Merging \(lens.camera.label)", fraction + 0.35 / Double(plan.tele.count))
@@ -114,11 +132,12 @@ public enum TeleFusion {
                 source, onto: canvas, field: field, trust: trust,
                 placement: placement, magnification: plan.magnification,
                 cropX: cropX, cropY: cropY, scale: scale)
-            let coverage = merger.add(warped, valid: valid)
+            let coverage = merger.add(warped, valid: valid, detailOnly: true)
             tiles.append(.init(
                 camera: lens.camera,
                 origin: CGPoint(x: CGFloat(placement.x), y: CGFloat(placement.y)),
                 placementScore: placement.score,
+                aligned: inside > 0 ? trusted / inside : 0,
                 coverage: coverage))
         }
 
@@ -237,7 +256,7 @@ enum TelePlacement {
             }
         }
 
-        let tile = 32
+        let tile = TileAligner.fullResolutionTile
         let cols = max(1, wide.width / tile), rows = max(1, wide.height / tile)
         var footprint = Plane(width: cols, height: rows)
         for ty in 0..<rows {
@@ -373,4 +392,22 @@ enum Resampler {
 func cubicWeights(_ t: Float) -> (Float, Float, Float, Float) {
     let t2 = t * t, t3 = t2 * t
     return (-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1, -1.5 * t3 + 2 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2)
+}
+
+/// Development aid: writes a plane as an 8-bit greyscale PNG.
+enum FusionDebug {
+    static func write(_ plane: Plane, to path: String, scaleDown: Int) {
+        let p = scaleDown > 1 ? plane.downsampled(by: scaleDown) : plane
+        let peak = max(1e-6, p.data.max() ?? 1)
+        let bytes = p.data.map { UInt8(max(0, min(255, ($0 / peak) * 255))) }
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
+              let image = CGImage(
+                width: p.width, height: p.height, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: p.width,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: 0), provider: provider,
+                decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+              let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil)
+        else { return }
+        CGImageDestinationAddImage(dest, image, nil)
+        CGImageDestinationFinalize(dest)
+    }
 }

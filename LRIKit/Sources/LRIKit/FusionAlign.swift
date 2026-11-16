@@ -31,6 +31,13 @@ enum TileAligner {
     static let coarseSearch = 16
     static let fineSearch = 2
 
+    /// Tile size at full resolution. Smaller tiles follow depth edges more
+    /// closely (less of the frame is lost around close objects) at the cost
+    /// of noisier matches, which the confidence-weighted smoothing absorbs.
+    static var fullResolutionTile: Int {
+        ProcessInfo.processInfo.environment["L16_FUSION_TILE"].flatMap(Int.init) ?? 32
+    }
+
     static func align(reference: Plane, target: Plane) -> TileField {
         // Pyramid: level 0 is full resolution.
         var refLevels = [reference], tgtLevels = [target]
@@ -42,7 +49,7 @@ enum TileAligner {
         var field: TileField?
         for level in stride(from: refLevels.count - 1, through: 0, by: -1) {
             let ref = refLevels[level], tgt = tgtLevels[level]
-            let tile = level == 0 ? 32 : 16
+            let tile = level == 0 ? fullResolutionTile : 16
             let cols = max(1, ref.width / tile), rows = max(1, ref.height / tile)
             var next = TileField(tile: tile, cols: cols, rows: rows)
 
@@ -285,12 +292,18 @@ extension TileField {
     /// merge. Bending is measured as the second difference, so a steady
     /// gradient -- a receding surface such as a desk or floor, where the
     /// shift changes smoothly with distance -- is still trusted.
-    func reliability(width: Int, height: Int, tolerance: Float = 2.5) -> Plane {
-        reliabilityGrid(tolerance: tolerance).resized(width: width, height: height)
+    func reliability(width: Int, height: Int) -> Plane {
+        reliabilityGrid().resized(width: width, height: height)
     }
 
+    /// How much bending between neighbouring tiles is tolerated, in pixels.
+    /// A given curvature bends less across a smaller tile, so the tolerance
+    /// shrinks with tile size (2.5 px was tuned for 32 px tiles).
+    var bendTolerance: Float { 2.5 * powf(Float(tile) / 32, 1.3) }
+
     /// The same trust measure on the tile grid itself (one value per tile).
-    func reliabilityGrid(tolerance: Float = 2.5) -> Plane {
+    func reliabilityGrid() -> Plane {
+        let tolerance = bendTolerance
         var grid = Plane(width: cols, height: rows)
         func bend(_ d: [Float], _ tx: Int, _ ty: Int) -> Float {
             let i = ty * cols + tx

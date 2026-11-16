@@ -111,7 +111,7 @@ struct DetailMerger {
     /// in pixels of the image being merged.
     let bandSigma: Float
     /// Relative base-band difference at which a frame's weight falls to half.
-    static let ghostTolerance: Float = 0.10
+    let ghostTolerance: Float
 
     private let width: Int
     private let height: Int
@@ -123,10 +123,11 @@ struct DetailMerger {
     private var baseWeight: Plane
     private var detailWeight: Plane
 
-    init(reference: RGBPlanes, bandSigma: Float = 2.5) {
+    init(reference: RGBPlanes, bandSigma: Float = 2.5, ghostTolerance: Float = 0.10) {
         width = reference.width
         height = reference.height
         self.bandSigma = bandSigma
+        self.ghostTolerance = ghostTolerance
         let base = RGBPlanes(
             r: reference.r.blurred(sigma: bandSigma),
             g: reference.g.blurred(sigma: bandSigma),
@@ -141,7 +142,7 @@ struct DetailMerger {
         detailSum = baseSum
         baseWeight = Plane(width: width, height: height)
         detailWeight = Plane(width: width, height: height)
-        accumulate(reference, base: base, sharpness: sharpness, consistency: consistency)
+        accumulate(reference, base: base, sharpness: sharpness, consistency: consistency, includeBase: true)
     }
 
     /// Local detail energy: blurred magnitude of the luminance detail band.
@@ -163,7 +164,11 @@ struct DetailMerger {
 
     /// Adds one frame already resampled onto the reference grid. Returns the
     /// share of the picture where it was accepted.
-    mutating func add(_ frame: RGBPlanes, valid: Plane) -> Float {
+    ///
+    /// `detailOnly`: the frame contributes texture but no tone. Used for
+    /// telephoto frames, which cover only part of the picture: letting them
+    /// shift the base band would leave a visible step at their borders.
+    mutating func add(_ frame: RGBPlanes, valid: Plane, detailOnly: Bool = false) -> Float {
         var frame = frame
         matchTone(&frame, valid: valid)
 
@@ -176,7 +181,7 @@ struct DetailMerger {
         // reference's, relative to local brightness.
         var consistency = base.luma()
         let w = width, h = height
-        let tol = Self.ghostTolerance
+        let tol = ghostTolerance
         consistency.data.withUnsafeMutableBufferPointer { c in
             refBaseLuma.data.withUnsafeBufferPointer { r in
                 valid.data.withUnsafeBufferPointer { v in
@@ -204,7 +209,7 @@ struct DetailMerger {
         }
 
         let sharpness = Self.sharpness(of: frame, base: base, sigma: bandSigma * 1.6)
-        accumulate(frame, base: base, sharpness: sharpness, consistency: consistency)
+        accumulate(frame, base: base, sharpness: sharpness, consistency: consistency, includeBase: !detailOnly)
         return Float(accepted / Double(w * h))
     }
 
@@ -237,17 +242,18 @@ struct DetailMerger {
         apply(&frame.b, gain(frame.b, refBase.b))
     }
 
-    private mutating func accumulate(_ image: RGBPlanes, base: RGBPlanes, sharpness: Plane, consistency: Plane) {
-        Self.accumulate(image.r, base.r, sharpness, consistency, &baseSum.r, &detailSum.r, &baseWeight, &detailWeight, updateWeights: true)
-        Self.accumulate(image.g, base.g, sharpness, consistency, &baseSum.g, &detailSum.g, &baseWeight, &detailWeight, updateWeights: false)
-        Self.accumulate(image.b, base.b, sharpness, consistency, &baseSum.b, &detailSum.b, &baseWeight, &detailWeight, updateWeights: false)
+    private mutating func accumulate(_ image: RGBPlanes, base: RGBPlanes, sharpness: Plane, consistency: Plane, includeBase: Bool) {
+        Self.accumulate(image.r, base.r, sharpness, consistency, &baseSum.r, &detailSum.r, &baseWeight, &detailWeight, updateWeights: true, includeBase: includeBase)
+        Self.accumulate(image.g, base.g, sharpness, consistency, &baseSum.g, &detailSum.g, &baseWeight, &detailWeight, updateWeights: false, includeBase: includeBase)
+        Self.accumulate(image.b, base.b, sharpness, consistency, &baseSum.b, &detailSum.b, &baseWeight, &detailWeight, updateWeights: false, includeBase: includeBase)
     }
 
     private static func accumulate(
         _ img: Plane, _ bse: Plane, _ sharpness: Plane, _ consistency: Plane,
         _ bSum: inout Plane, _ dSum: inout Plane, _ baseWeight: inout Plane, _ detailWeight: inout Plane,
-        updateWeights: Bool
+        updateWeights: Bool, includeBase: Bool
     ) {
+        let baseScale: Float = includeBase ? 1 : 0
         let w = img.width, h = img.height
         let epsilon: Float = 2e-4
         img.data.withUnsafeBufferPointer { ip in
@@ -264,7 +270,7 @@ struct DetailMerger {
                     // Base band: mild preference for the sharper frame.
                     // Detail band: strong preference (squared), so an
                     // out-of-focus lens can't soften a sharp one.
-                    let wb = cp[i] * s
+                    let wb = cp[i] * s * baseScale
                     let wd = cp[i] * s * s
                     bs[i] += wb * bp[i]
                     ds[i] += wd * (ip[i] - bp[i])
