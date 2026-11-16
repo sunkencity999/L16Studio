@@ -95,6 +95,17 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
         print("camera infos (hw map): \(file.cameraInfos.count)")
         print("image count: \(file.images.count)")
 
+        if CommandLine.arguments.contains("--mono-dng") {
+            // Writes the monochrome module as a LinearRaw DNG.
+            for image in file.images where image.sensor == .ar1335Mono {
+                let out = url.deletingLastPathComponent()
+                    .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_\(image.camera)_mono.dng")
+                try ImageRenderer.exportDNG(image, from: file, to: out)
+                print("wrote \(out.lastPathComponent)")
+            }
+            continue
+        }
+
         if CommandLine.arguments.contains("--fuse-tele") {
             // Full fusion: wide merge plus telephoto detail, at the shot's focal length.
             let scale = CommandLine.arguments.first { $0.hasPrefix("--scale=") }.flatMap { Float($0.dropFirst(8)) }
@@ -160,7 +171,7 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
                 let mean = samples.reduce(0.0) { $0 + Double($1) } / Double(samples.count)
                 print("      unpacked \(samples.count) samples: min=\(minV) max=\(maxV) mean=\(String(format: "%.1f", mean))")
 
-                if CommandLine.arguments.contains("--thumbs"), image.cfaPattern != nil {
+                if CommandLine.arguments.contains("--thumbs"), image.cfaPattern != nil || image.sensor == .ar1335Mono {
                     // One small render per colour module, for eyeballing
                     // per-lens colour and orientation side by side.
                     let thumbURL = url.deletingLastPathComponent()

@@ -22,7 +22,7 @@ below) but not a port of any existing project's source.
   a DNG built from the decoded sensor data.
 - **Fusion**: combines the lenses into one image, shown as "Fused" at the
   front of the lens strip. "Wide merge" combines the lenses that share the
-  reference's focal length (lower noise, 13 MP). "Full detail" then adds the
+  reference's focal length, including the mono lens (lower noise, 13 MP). "Full detail" then adds the
   telephoto lenses and crops to the shot's focal length, up to 52 MP.
 - **Adjust**: exposure and white balance (temperature, tint), live.
 - **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
@@ -112,7 +112,7 @@ full-detail fusion (`<name>_fused_tele.jpg`; `--scale=2` for a smaller one).
   with the reference. Far scenes gain real resolution from the telephoto
   lenses; at close range they mostly don't line up, so the result there is
   close to the wide merge enlarged.
-- **Full-detail fusion needs a lot of memory** (around 10 GB at 52 MP). On
+- **Full-detail fusion needs a lot of memory** (around 8 GB at 52 MP). On
   Macs with less than 24 GB the app starts on the wide merge.
 - **`RAW_BAYER_JPEG` pixel format is implemented but unvalidated**: it's
   coded to the documented spec, but no capture from the camera used for

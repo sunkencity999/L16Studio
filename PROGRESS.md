@@ -234,3 +234,31 @@ each and the merger holds a dozen). The app defaults to the wide merge below
 24 GB of RAM. Alignment precision is limited to the wide grid's sub-pixel fit
 (roughly 0.25-0.5 telephoto pixels); a refinement pass at telephoto scale
 would sharpen the result further.
+
+## Fusion refinements (2026-11-16, later)
+
+- **Telephoto frames add detail only** (`DetailMerger.add(detailOnly:)`). When
+  they also shifted the base band, their borders showed as steps on plain
+  surfaces. Their agreement tolerance is 0.04 (wide merge: 0.10), which
+  removed thin stray lines of uncorroborated telephoto detail.
+- **Close range is still the weak spot.** `L16_FUSION_DEBUG=<dir>` dumps each
+  telephoto frame pasted at its placement plus its trust grid. On the
+  keyboard shot the alignment is trusted only on key tops, in a checkerboard:
+  every gap between keys is a depth step. 16 px tiles (`L16_FUSION_TILE=16`)
+  looked like a big gain until the bend tolerance was scaled to the tile size
+  (`bendTolerance`), after which they accept about the same area as 32 px
+  tiles; the apparent gain was the looser tolerance letting creases back in.
+  A real improvement needs a different model (per-pixel flow or depth planes
+  from the geometric calibration), not smaller tiles.
+- **Memory**: 52 MP peak cut from 10.4 GB to 8.1 GB (in-place tone matching,
+  1/16-size reference for tone, in-place finish, no-copy CGImage). Output
+  byte-identical. The per-frame working set is what remains.
+- **Mono lens (A2)**: `DNGWriter` writes it as a LinearRaw DNG, which
+  `CIRAWFilter` accepts, so `LensRenderer` now uses one path for colour and
+  mono (the hand-rolled grey render is gone) and mono exports as DNG. In the
+  wide merge it is aligned like any lens and added detail-only; tone matching
+  scales each channel to the reference's local colour, so it cannot
+  desaturate. It needed -0.7 EV (the unfiltered sensor collects about 1.65x
+  the light of a colour module's green channel); with that, it is accepted
+  over 63% / 22% / 35% of the room / keyboard / near-to-far shots. Visible
+  effect is small: slightly cleaner shadows, no artifacts seen.

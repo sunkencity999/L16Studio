@@ -76,12 +76,16 @@ final class ShotSession {
 
     var selectedImage: RawImage? { lenses.first { $0.camera == selectedLens } }
 
-    /// The lenses a fusion would merge: colour lenses sharing the reference's focal length.
+    /// The lenses the wide merge combines: everything sharing the reference's
+    /// focal length (the mono lens adds luminance detail).
     var fusableLenses: [RawImage] {
         guard let file, let reference = file.referenceImage, reference.cfaPattern != nil else { return [] }
-        return lenses.filter { $0.cfaPattern != nil && $0.camera.focalLength == reference.camera.focalLength }
+        return lenses.filter {
+            $0.camera.focalLength == reference.camera.focalLength && ($0.cfaPattern != nil || $0.sensor == .ar1335Mono)
+        }
     }
-    var canFuse: Bool { fusableLenses.count >= 2 }
+    /// A merge needs the reference plus at least one other colour lens.
+    var canFuse: Bool { fusableLenses.filter { $0.cfaPattern != nil }.count >= 2 }
 
     func open() async {
         isWorking = true
@@ -302,9 +306,10 @@ final class ShotSession {
         }.value
     }
 
-    /// Lenses that can be exported in `format` (the mono lens has no DNG path yet).
+    /// Lenses that can be exported in `format`. Every lens the app can render
+    /// has a DNG form: CFA for colour, LinearRaw for the mono lens.
     func exportable(_ format: ExportFormat) -> [RawImage] {
-        lenses.filter { format != .dng || $0.cfaPattern != nil }
+        lenses.filter { $0.cfaPattern != nil || $0.sensor == .ar1335Mono }
     }
 
     /// Exports the fused image, re-running the merge if the adjustments

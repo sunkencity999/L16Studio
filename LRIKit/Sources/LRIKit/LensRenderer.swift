@@ -47,14 +47,13 @@ public final class LensRenderer: @unchecked Sendable {
     /// The exact as-shot neutral, kept so "no override" restores it
     /// precisely (temperature/tint round-trips are lossy).
     private var asShotChromaticity: CGPoint = .zero
-    private let filter: CIRAWFilter?
-    private let monoSamples: [UInt16]?
+    private let filter: CIRAWFilter
     private let blackLevel: Float
     private let baselineEV: Float
 
     private static let context = CIContext(options: [.cacheIntermediates: false])
 
-    public var isMonochrome: Bool { filter == nil }
+    public let isMonochrome: Bool
 
     public init(image: RawImage, file: LRIFile) throws {
         self.image = image
@@ -67,29 +66,30 @@ public final class LensRenderer: @unchecked Sendable {
             .first(where: { $0.sensorType == image.sensor })?.characterization.blackLevel ?? 42
         baselineEV = image.baselineExposure(file.metadata)
 
-        if image.cfaPattern != nil {
-            let dng = try DNGWriter.write(
-                image: image,
-                samples: samples,
-                blackLevel: blackLevel,
-                orientation: orientation,
-                neutral: image.asShotNeutral(file.metadata),
-                baselineExposure: baselineEV
-            )
-            guard let filter = CIRAWFilter(imageData: dng, identifierHint: nil) else {
-                throw ImageRendererError.rawFilterRejectedDNG
-            }
-            self.filter = filter
-            self.monoSamples = nil
-            asShotTemperature = filter.neutralTemperature
-            asShotTint = filter.neutralTint
-            asShotChromaticity = filter.neutralChromaticity
-        } else if image.sensor == .ar1335Mono {
-            self.filter = nil
-            self.monoSamples = samples
-        } else {
+        guard image.cfaPattern != nil || image.sensor == .ar1335Mono else {
             throw ImageRendererError.monoNotYetSupported
         }
+        // Colour modules become a CFA DNG, the monochrome module a LinearRaw
+        // DNG; both go through the same CIRAWFilter pipeline, so they share
+        // its tone rendering (which matters when they are merged).
+        let dng = try DNGWriter.write(
+            image: image,
+            samples: samples,
+            blackLevel: blackLevel,
+            orientation: orientation,
+            neutral: image.asShotNeutral(file.metadata),
+            baselineExposure: baselineEV
+        )
+        guard let filter = CIRAWFilter(imageData: dng, identifierHint: nil) else {
+            throw ImageRendererError.rawFilterRejectedDNG
+        }
+        self.filter = filter
+        isMonochrome = image.cfaPattern == nil
+        if !isMonochrome {
+            asShotTemperature = filter.neutralTemperature
+            asShotTint = filter.neutralTint
+        }
+        asShotChromaticity = filter.neutralChromaticity
     }
 
     /// Renders with the given adjustments. `maxDimension` (longest side, in
@@ -98,13 +98,6 @@ public final class LensRenderer: @unchecked Sendable {
     public func render(_ adjustments: RenderAdjustments = .none, maxDimension: Int? = nil) throws -> CGImage {
         lock.lock()
         defer { lock.unlock() }
-        if let filter {
-            return try renderColor(filter, adjustments, maxDimension)
-        }
-        return try renderMono(adjustments, maxDimension)
-    }
-
-    private func renderColor(_ filter: CIRAWFilter, _ adj: RenderAdjustments, _ maxDimension: Int?) throws -> CGImage {
         if let maxDimension {
             let scale = Float(maxDimension) / Float(max(image.width, image.height))
             filter.isDraftModeEnabled = scale < 0.5
@@ -113,13 +106,7 @@ public final class LensRenderer: @unchecked Sendable {
             filter.isDraftModeEnabled = false
             filter.scaleFactor = 1
         }
-        filter.exposure = adj.exposure
-        if adj.temperature == nil, adj.tint == nil {
-            filter.neutralChromaticity = asShotChromaticity
-        } else if let asShotTemperature, let asShotTint {
-            filter.neutralTemperature = adj.temperature ?? asShotTemperature
-            filter.neutralTint = adj.tint ?? asShotTint
-        }
+        apply(adjustments)
 
         guard let output = filter.outputImage else { throw ImageRendererError.rawFilterProducedNoOutput }
         guard let cg = Self.context.createCGImage(
@@ -131,62 +118,24 @@ public final class LensRenderer: @unchecked Sendable {
         return cg
     }
 
-    private func renderMono(_ adj: RenderAdjustments, _ maxDimension: Int?) throws -> CGImage {
-        guard let samples = monoSamples else { throw ImageRendererError.renderFailed }
-        let width = image.width, height = image.height
-        let gain = powf(2, baselineEV + adj.exposure) / max(1, 1023 - blackLevel)
-        var pixels = [UInt16](repeating: 0, count: samples.count)
-        let black = blackLevel
-        samples.withUnsafeBufferPointer { src in
-            pixels.withUnsafeMutableBufferPointer { dst in
-                for i in 0..<src.count {
-                    let linear = (Float(src[i]) - black) * gain
-                    dst[i] = UInt16(max(0, min(1, linear)) * 65535)
-                }
-            }
+    private func apply(_ adj: RenderAdjustments) {
+        filter.exposure = adj.exposure
+        guard !isMonochrome else { return }
+        if adj.temperature == nil, adj.tint == nil {
+            filter.neutralChromaticity = asShotChromaticity
+        } else if let asShotTemperature, let asShotTint {
+            filter.neutralTemperature = adj.temperature ?? asShotTemperature
+            filter.neutralTint = adj.tint ?? asShotTint
         }
-        let data = pixels.withUnsafeBufferPointer { Data(buffer: $0) }
-        guard let provider = CGDataProvider(data: data as CFData),
-              let space = CGColorSpace(name: CGColorSpace.linearGray),
-              let full = CGImage(
-                width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 16,
-                bytesPerRow: width * 2, space: space,
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue | CGBitmapInfo.byteOrder16Little.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-        else { throw ImageRendererError.renderFailed }
-
-        // Re-draw into 8-bit display grey, applying orientation and any downscale.
-        var ci = CIImage(cgImage: full)
-        if orientation != .normal, let o = CGImagePropertyOrientation(rawValue: UInt32(orientation.rawValue)) {
-            ci = ci.oriented(o)
-        }
-        if let maxDimension {
-            let scale = CGFloat(maxDimension) / max(ci.extent.width, ci.extent.height)
-            if scale < 1 { ci = ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
-        }
-        guard let cg = Self.context.createCGImage(
-            ci, from: ci.extent.integral, format: .RGBA8,
-            colorSpace: CGColorSpace(name: CGColorSpace.displayP3)
-        ) else {
-            throw ImageRendererError.renderFailed
-        }
-        return cg
     }
 
     /// Full-resolution render as linear-light float planes, for fusion.
     func renderLinear(_ adjustments: RenderAdjustments = .none) throws -> RGBPlanes {
         lock.lock()
         defer { lock.unlock() }
-        guard let filter else { throw ImageRendererError.monoNotYetSupported }
         filter.isDraftModeEnabled = false
         filter.scaleFactor = 1
-        filter.exposure = adjustments.exposure
-        if adjustments.temperature == nil, adjustments.tint == nil {
-            filter.neutralChromaticity = asShotChromaticity
-        } else if let asShotTemperature, let asShotTint {
-            filter.neutralTemperature = adjustments.temperature ?? asShotTemperature
-            filter.neutralTint = adjustments.tint ?? asShotTint
-        }
+        apply(adjustments)
         guard let output = filter.outputImage else { throw ImageRendererError.rawFilterProducedNoOutput }
         let extent = output.extent.integral
         let width = Int(extent.width), height = Int(extent.height)

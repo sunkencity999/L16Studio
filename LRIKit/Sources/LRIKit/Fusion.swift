@@ -66,12 +66,16 @@ public enum WideFusion {
               reference.cfaPattern != nil else {
             throw FusionError.noReference
         }
-        let others = file.images.filter {
+        let sameView = file.images.filter {
             $0.camera != reference.camera
-                && $0.cfaPattern != nil
                 && $0.camera.focalLength == reference.camera.focalLength
                 && $0.width == reference.width && $0.height == reference.height
         }
+        // Colour lenses first (they shape tone and colour), then the
+        // monochrome lens, which can only contribute luminance detail.
+        let includeMono = ProcessInfo.processInfo.environment["L16_FUSION_NO_MONO"] == nil
+        let others = sameView.filter { $0.cfaPattern != nil }
+            + (includeMono ? sameView.filter { $0.sensor == .ar1335Mono } : [])
         guard !others.isEmpty else { throw FusionError.nothingToMerge }
 
         let steps = Double(others.count + 2)
@@ -88,7 +92,10 @@ public enum WideFusion {
             var (warped, valid) = field.warp(source)
             let trust = field.reliability(width: valid.width, height: valid.height)
             for i in 0..<valid.data.count { valid.data[i] *= trust.data[i] }
-            let coverage = merger.add(&warped, valid: valid)
+            // The monochrome frame is grey in all three channels; tone
+            // matching scales each channel to the reference's local colour,
+            // and it then adds detail only, so it can't desaturate anything.
+            let coverage = merger.add(&warped, valid: valid, detailOnly: lens.cfaPattern == nil)
 
             let magnitudes = zip(field.dx, field.dy).map { ($0 * $0 + $1 * $1).squareRoot() }.sorted()
             frames.append(.init(

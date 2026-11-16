@@ -61,7 +61,8 @@ public enum DNGWriter {
         neutral: (r: Float, g: Float, b: Float)? = nil,
         baselineExposure: Float = 0
     ) throws -> Data {
-        guard let cfa = image.cfaPattern else {
+        let cfa = image.cfaPattern
+        guard cfa != nil || image.sensor == .ar1335Mono else {
             throw DNGWriterError.monoNotYetSupported
         }
         guard samples.count == image.width * image.height else {
@@ -88,7 +89,9 @@ public enum DNGWriter {
         tiff.add(tag: 257, long: UInt32(image.height)) // ImageLength
         tiff.add(tag: 258, short: 16) // BitsPerSample (stored width; real depth is 10, see WhiteLevel)
         tiff.add(tag: 259, short: 1) // Compression: none
-        tiff.add(tag: 262, short: 32803) // PhotometricInterpretation: CFA
+        // CFA for the colour modules; LinearRaw (one sample per pixel, no
+        // mosaic) for the monochrome module.
+        tiff.add(tag: 262, short: cfa != nil ? 32803 : 34892) // PhotometricInterpretation
         tiff.add(tag: 271, ascii: "Light") // Make
         tiff.add(tag: 272, ascii: "L16") // Model
         tiff.add(tag: 273, long: 0) // StripOffsets (patched by TIFFWriter.build)
@@ -98,8 +101,10 @@ public enum DNGWriter {
         tiff.add(tag: 274, short: orientation.rawValue) // Orientation
         tiff.add(tag: 284, short: 1) // PlanarConfiguration
 
-        tiff.add(tag: 33421, shorts: [2, 2]) // CFARepeatPatternDim
-        tiff.add(tag: 33422, bytes: cfa.dngBytes) // CFAPattern
+        if let cfa {
+            tiff.add(tag: 33421, shorts: [2, 2]) // CFARepeatPatternDim
+            tiff.add(tag: 33422, bytes: cfa.dngBytes) // CFAPattern
+        }
 
         tiff.add(tag: 50706, bytes: [1, 4, 0, 0]) // DNGVersion 1.4
         tiff.add(tag: 50707, bytes: [1, 1, 0, 0]) // DNGBackwardVersion
@@ -113,28 +118,30 @@ public enum DNGWriter {
             ])
         }
 
-        if let calA, let calD65 {
-            matrixTag(50721, calA.colorMatrix)      // ColorMatrix1
-            matrixTag(50722, calD65.colorMatrix)    // ColorMatrix2
-            tiff.add(tag: 50778, short: exifLightSource(.a))   // CalibrationIlluminant1
-            tiff.add(tag: 50779, short: exifLightSource(.d65)) // CalibrationIlluminant2
-            matrixTag(50964, calA.forwardMatrix)    // ForwardMatrix1
-            matrixTag(50965, calD65.forwardMatrix)  // ForwardMatrix2
-        } else if let single {
-            matrixTag(50721, single.colorMatrix)
-            tiff.add(tag: 50778, short: exifLightSource(single.whitepoint))
-            matrixTag(50964, single.forwardMatrix)
-        } else {
-            // No factory calibration in this file: generic sRGB D65 XYZ->camera.
-            matrixTag(50721, (3.2404542, -1.5371385, -0.4985314,
-                              -0.9692660, 1.8760108, 0.0415560,
-                              0.0556434, -0.2040259, 1.0572252))
-            tiff.add(tag: 50778, short: exifLightSource(.d65))
-        }
+        if cfa != nil {
+            if let calA, let calD65 {
+                matrixTag(50721, calA.colorMatrix)      // ColorMatrix1
+                matrixTag(50722, calD65.colorMatrix)    // ColorMatrix2
+                tiff.add(tag: 50778, short: exifLightSource(.a))   // CalibrationIlluminant1
+                tiff.add(tag: 50779, short: exifLightSource(.d65)) // CalibrationIlluminant2
+                matrixTag(50964, calA.forwardMatrix)    // ForwardMatrix1
+                matrixTag(50965, calD65.forwardMatrix)  // ForwardMatrix2
+            } else if let single {
+                matrixTag(50721, single.colorMatrix)
+                tiff.add(tag: 50778, short: exifLightSource(single.whitepoint))
+                matrixTag(50964, single.forwardMatrix)
+            } else {
+                // No factory calibration in this file: generic sRGB D65 XYZ->camera.
+                matrixTag(50721, (3.2404542, -1.5371385, -0.4985314,
+                                  -0.9692660, 1.8760108, 0.0415560,
+                                  0.0556434, -0.2040259, 1.0572252))
+                tiff.add(tag: 50778, short: exifLightSource(.d65))
+            }
 
-        let n = neutral ?? image.calibratedNeutral(for: .d65) ?? (1, 1, 1)
-        tiff.add(tag: 50727, rationals: [(1, 1), (1, 1), (1, 1)]) // AnalogBalance: identity
-        tiff.add(tag: 50728, rationals: [rational(n.r), rational(n.g), rational(n.b)]) // AsShotNeutral
+            let n = neutral ?? image.calibratedNeutral(for: .d65) ?? (1, 1, 1)
+            tiff.add(tag: 50727, rationals: [(1, 1), (1, 1), (1, 1)]) // AnalogBalance: identity
+            tiff.add(tag: 50728, rationals: [rational(n.r), rational(n.g), rational(n.b)]) // AsShotNeutral
+        }
         tiff.add(tag: 50730, srationals: [srational(baselineExposure)]) // BaselineExposure (EV)
 
         // BlackLevel: the real per-sensor value from SensorData when the
@@ -171,7 +178,12 @@ extension RawImage {
         if let shotTime = metadata.imageIntegrationTime, shotTime > 0, exposure > 0 {
             ratio *= Float(shotTime / exposure)
         }
-        return max(-3, min(3, log2(ratio)))
+        // The monochrome sensor has no colour filter, so it collects more
+        // light than a colour module's green channel at the same settings.
+        // Measured on a real shot: about 1.65x (mono mean vs. estimated green
+        // level above black), i.e. roughly 0.7 EV to pull back.
+        let monoOffset: Float = sensor == .ar1335Mono ? -0.7 : 0
+        return max(-3, min(3, log2(ratio) + monoOffset))
     }
 
     /// Camera-native RGB of a neutral surface under one of the factory

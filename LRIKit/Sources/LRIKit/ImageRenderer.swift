@@ -19,7 +19,7 @@ public enum ImageRendererError: Error, CustomStringConvertible {
         case .rawFilterProducedNoOutput: "CIRAWFilter produced no output image"
         case .renderFailed: "failed to render the raw filter's output to an image"
         case .destinationCreationFailed: "failed to create an image destination for export"
-        case .monoNotYetSupported: "rendering monochrome captures isn't implemented yet"
+        case .monoNotYetSupported: "this capture's sensor type isn't supported"
         }
     }
 }
@@ -46,7 +46,7 @@ public enum ImageRenderer {
             // documented plane-ordering uncertainty; revisit once that's confirmed.
             throw ImageRendererError.unpackingUnavailable
         }
-        guard image.cfaPattern != nil else {
+        guard image.cfaPattern != nil || image.sensor == .ar1335Mono else {
             throw ImageRendererError.monoNotYetSupported
         }
 
