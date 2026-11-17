@@ -229,7 +229,14 @@ final class Look {
      */
     Bitmap render(RenderScript rs, Bitmap source, float sharpenScale) {
         {
-            Allocation a = Allocation.createFromBitmap(rs, source);
+            // USAGE_SCRIPT alone makes the allocation a private copy. The
+            // one-argument createFromBitmap *shares* the bitmap's memory, and
+            // since the passes below write back into `a`, that overwrote the
+            // source: the "original" silently became the edited picture
+            // (hold-to-compare showed no difference) and every re-render
+            // applied the look on top of the previous one.
+            Allocation a = Allocation.createFromBitmap(rs, source,
+                    Allocation.MipmapControl.MIPMAP_NONE, Allocation.USAGE_SCRIPT);
             Allocation b = Allocation.createTyped(rs, a.getType());
 
             ScriptIntrinsicLUT lut = ScriptIntrinsicLUT.create(rs, Element.U8_4(rs));
