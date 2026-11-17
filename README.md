@@ -1,10 +1,14 @@
 # L16Studio
 
-A fully native SwiftUI macOS app for viewing and converting RAW photos from
-the [Light L16](https://en.wikipedia.org/wiki/Light_(company)) — the 16-lens
-computational camera from Light Co. (defunct as of 2022). L16Studio reads the
-L16's proprietary `.lri` RAW container directly, with no dependency on
-Light's own (now unmaintained, buggy) Lumen desktop software.
+Software to keep the [Light L16](https://en.wikipedia.org/wiki/Light_(company))
+useful: the 16-lens computational camera from Light Co. (defunct as of 2022).
+
+- **L16Studio for macOS**: a native SwiftUI app that reads the L16's
+  proprietary `.lri` RAW container directly, fuses its lenses into one image,
+  and manages, adjusts and exports the results, with no dependency on
+  Light's own (now unmaintained) Lumen desktop software.
+- **L16 Studio for the camera**: a small Android app that runs on the L16
+  itself, with a gallery, an editor and cable-free transfer to the Mac.
 
 Built from a clean-room Swift implementation of the `.lri` format, informed
 by prior community reverse-engineering (see [Attribution](#attribution)
@@ -26,6 +30,10 @@ below) but not a port of any existing project's source.
   reference's focal length, including the mono lens (lower noise, 13 MP). "Full detail" then adds the
   telephoto lenses and crops to the shot's focal length, up to 52 MP.
 - **Adjust**: exposure and white balance (temperature, tint), live.
+- **Looks**: Auto measures each picture's tonal range, mid-tones and colour
+  cast and corrects them; Vivid, Golden, Crisp, Film and Mono build on that,
+  with sliders to fine-tune. They apply to single lenses and to the fused
+  image, and are the same looks as the on-camera editor.
 - **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
   as JPEG, HEIC or 16-bit TIFF.
 
@@ -78,7 +86,8 @@ Inside the app:
   automatically on the same network, or enter the address it shows).
 - Double-click a shot to open it. Left/right arrows change lens, Esc returns
   to the library, double-click the image to switch between fit and 100%.
-- Adjustments and export are in the inspector on the right (⌥⌘I).
+- Adjustments, looks and export are in the inspector on the right (⌥⌘I).
+  Looks are baked into JPEG, HEIC and TIFF exports; DNG stays raw.
 
 Imported camera shots are stored in `~/Pictures/L16 Studio`. The library
 index lives in `~/Library/Application Support/L16Studio`.

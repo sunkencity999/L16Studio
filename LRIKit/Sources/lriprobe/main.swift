@@ -109,10 +109,18 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
         if CommandLine.arguments.contains("--fuse-tele") {
             // Full fusion: wide merge plus telephoto detail, at the shot's focal length.
             let scale = CommandLine.arguments.first { $0.hasPrefix("--scale=") }.flatMap { Float($0.dropFirst(8)) }
-            let (fused, report) = try TeleFusion.fuse(file: file, scale: scale) { message, fraction in
+            let (merged, report) = try TeleFusion.fuse(file: file, scale: scale) { message, fraction in
                 print(String(format: "  fuse %3.0f%%  %@", fraction * 100, message))
             }
-            let base = url.deletingLastPathComponent().appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_fused_tele")
+            let lookName = CommandLine.arguments.first { $0.hasPrefix("--look=") }.map { String($0.dropFirst(7)) }
+            var fused = merged
+            var suffix = "_fused_tele"
+            if let lookName, let style = LookStyle(rawValue: lookName),
+               let styled = LookRenderer.apply(LookSettings(style: style), to: fused) {
+                fused = styled
+                suffix += "_\(lookName)"
+            }
+            let base = url.deletingLastPathComponent().appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)\(suffix)")
             if let dest = CGImageDestinationCreateWithURL(base.appendingPathExtension("jpg") as CFURL, "public.jpeg" as CFString, 1, nil) {
                 CGImageDestinationAddImage(dest, fused, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
                 CGImageDestinationFinalize(dest)

@@ -18,6 +18,7 @@ struct InspectorView: View {
                         LensInfoSection(lens: lens)
                     }
                     AdjustSection(session: session)
+                    LookSection(session: session)
                     ExportSection(session: session, shotName: shot.name)
                 } else if model.library.selection.count == 1, let shot = model.library.shot(model.library.selection.first) {
                     ShotInfoSection(shot: shot)
@@ -228,6 +229,80 @@ struct AdjustSection: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range)
+                .controlSize(.small)
+        }
+    }
+}
+
+/// Finishing looks: Auto and its styles, with sliders to fine-tune.
+struct LookSection: View {
+    @Bindable var session: ShotSession
+    @State private var showsSliders = false
+
+    private var settings: LookSettings { session.adjustments.look ?? LookSettings(style: .original) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                SectionHeader(title: "Look")
+                Spacer()
+                Button(showsSliders ? "Hide sliders" : "Fine-tune") { showsSliders.toggle() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .disabled(session.adjustments.look == nil)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 6)], spacing: 6) {
+                ForEach(LookStyle.allCases) { style in
+                    let isOn = settings.style == style
+                    Button {
+                        // Original means no look at all; anything else starts from the preset.
+                        session.adjustments.look = style == .original ? nil : LookSettings(style: style)
+                    } label: {
+                        Text(style.label)
+                            .font(.callout.weight(isOn ? .semibold : .regular))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .background(isOn ? Theme.accent : Theme.tile, in: RoundedRectangle(cornerRadius: 6))
+                            .foregroundStyle(isOn ? Color.black : Color.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if showsSliders, session.adjustments.look != nil {
+                slider("Contrast", \.contrast, -1...1)
+                slider("Highlights", \.highlights, -1...1)
+                slider("Shadows", \.shadows, -1...1)
+                slider("Colour", \.saturation, 0...2)
+                slider("Warmth", \.warmth, -1...1)
+                slider("Fade", \.fade, 0...1)
+                slider("Sharpen", \.sharpen, 0...1)
+            }
+            Text(settings.style == .original
+                 ? "Auto measures this picture's tonal range, mid-tones and colour cast and corrects them; the other looks build on that."
+                 : "\(settings.style.label)\(settings.isPreset ? "" : ", fine-tuned"). Applied to every lens and to the fused image, and baked into JPEG, HEIC and TIFF exports (DNG stays raw).")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func slider(_ title: String, _ keyPath: WritableKeyPath<LookSettings, Float>, _ range: ClosedRange<Float>) -> some View {
+        let binding = Binding<Float>(
+            get: { settings[keyPath: keyPath] },
+            set: { value in
+                var next = settings
+                next[keyPath: keyPath] = value
+                session.adjustments.look = next
+            })
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title).font(.callout)
+                Spacer()
+                Text(String(format: "%+.2f", binding.wrappedValue))
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: binding, in: range)
                 .controlSize(.small)
         }
     }

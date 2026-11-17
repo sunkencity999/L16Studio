@@ -320,3 +320,36 @@ compares with the stock gallery's own editing (I have not looked at what that
 offers), behaviour on very dark or very bright photos, and hold-to-compare.
 Limits: tone shaping is a global curve (no local shadow recovery), and it
 edits the camera's 8-bit preview, not the raw file.
+
+## Looks in the Mac app (2026-11-16)
+
+`LRIKit/Look.swift` ports the on-camera editor's maths: `LookMeasurement`
+(the Auto analysis), `LookSettings` (style presets + sliders, stored in
+`RenderAdjustments.look`), and `LookRenderer`, which bakes the per-channel
+tone curve and the saturation change into a 48^3 `CIColorCubeWithColorSpace`
+(Display P3) followed by `CIUnsharpMask`.
+
+- Single lenses: `LensRenderer.render` applies the look after the raw
+  development. The measurement is taken once, from the as-shot rendering, so
+  later exposure or white-balance changes aren't undone by Auto.
+- Fusion merges developed frames without the look and the look is applied to
+  the result (`LookRenderer.apply(_:to:)`, measured from that image). The app
+  caches the merge, so changing the look doesn't re-run it.
+- Inspector: a Look section with style buttons and "Fine-tune" sliders.
+
+Bugs found while testing, both fixed:
+- Measuring by temporarily changing the `CIRAWFilter`'s `scaleFactor` and
+  setting it back left later full-size renders small (a thumbnail-sized image
+  in the middle of the canvas). The measurement now shrinks the developed
+  image with a plain transform and leaves the filter alone.
+- The colour-cast estimate treated pale green walls as near-neutral and
+  "corrected" whites to lavender. It now counts only nearly grey pixels
+  (max-min < 26 of 255), needs 8% of the frame, moves half-way, is capped at
+  +/-8%, and the channel gains ease off towards white. Same change made in
+  `camera-app/.../Look.java`.
+
+Checked: all seven styles on the fused room shot from the command line
+(`lriprobe --fuse-tele --look=vivid`), and Vivid in the app on a single lens
+and on the 52 MP fusion. Not checked: clicking the style buttons and sliders
+in the app (the look was set through the library file for the test), and
+exports with a look applied.

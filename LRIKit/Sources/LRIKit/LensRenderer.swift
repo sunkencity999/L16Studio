@@ -12,11 +12,23 @@ public struct RenderAdjustments: Sendable, Hashable, Codable {
     public var temperature: Float?
     /// White balance tint override; `nil` keeps the as-shot value.
     public var tint: Float?
+    /// The finishing look (Auto, Vivid, ...), applied after the raw
+    /// development; `nil` leaves the developed image as it is.
+    public var look: LookSettings?
 
-    public init(exposure: Float = 0, temperature: Float? = nil, tint: Float? = nil) {
+    public init(exposure: Float = 0, temperature: Float? = nil, tint: Float? = nil, look: LookSettings? = nil) {
         self.exposure = exposure
         self.temperature = temperature
         self.tint = tint
+        self.look = look
+    }
+
+    /// The raw-development part only. Fusion merges developed frames and
+    /// applies the look once, to the merged result.
+    public var withoutLook: RenderAdjustments {
+        var copy = self
+        copy.look = nil
+        return copy
     }
 
     public static let none = RenderAdjustments()
@@ -48,6 +60,9 @@ public final class LensRenderer: @unchecked Sendable {
     /// precisely (temperature/tint round-trips are lossy).
     private var asShotChromaticity: CGPoint = .zero
     private let filter: CIRAWFilter
+    /// Measured once from the as-shot rendering, so that later exposure or
+    /// white-balance changes aren't quietly undone by the Auto correction.
+    private var measurement: LookMeasurement?
     private let blackLevel: Float
     private let baselineEV: Float
 
@@ -106,9 +121,17 @@ public final class LensRenderer: @unchecked Sendable {
             filter.isDraftModeEnabled = false
             filter.scaleFactor = 1
         }
+        // Measure first (it renders with as-shot settings), then develop.
+        var look: (LookSettings, LookMeasurement)?
+        if let settings = adjustments.look {
+            look = (settings, settings.usesAutoCorrection ? measureLocked() : .identity)
+        }
         apply(adjustments)
 
-        guard let output = filter.outputImage else { throw ImageRendererError.rawFilterProducedNoOutput }
+        guard var output = filter.outputImage else { throw ImageRendererError.rawFilterProducedNoOutput }
+        if let (settings, measured) = look {
+            output = LookRenderer.apply(settings, measurement: measured, to: output, scale: CGFloat(filter.scaleFactor))
+        }
         guard let cg = Self.context.createCGImage(
             output, from: output.extent, format: .RGBA8,
             colorSpace: CGColorSpace(name: CGColorSpace.displayP3)
@@ -116,6 +139,32 @@ public final class LensRenderer: @unchecked Sendable {
             throw ImageRendererError.renderFailed
         }
         return cg
+    }
+
+    /// The Auto measurement for this lens (computed on first use).
+    public func lookMeasurement() -> LookMeasurement {
+        lock.lock()
+        defer { lock.unlock() }
+        return measureLocked()
+    }
+
+    /// Call with `lock` held. Measures the as-shot rendering at whatever
+    /// size the filter is currently set to, shrunk with a plain transform.
+    /// (Changing the filter's own scale here and restoring it afterwards
+    /// left later full-size renders at the small size.)
+    private func measureLocked() -> LookMeasurement {
+        if let measurement { return measurement }
+        apply(.none)
+        var result = LookMeasurement.identity
+        if let developed = filter.outputImage, developed.extent.width > 0 {
+            let scale = min(1, 360 / max(developed.extent.width, developed.extent.height))
+            let small = developed.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            if let cg = Self.context.createCGImage(small, from: small.extent.integral, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.displayP3)) {
+                result = LookMeasurement.analyse(cg)
+            }
+        }
+        measurement = result
+        return result
     }
 
     private func apply(_ adj: RenderAdjustments) {

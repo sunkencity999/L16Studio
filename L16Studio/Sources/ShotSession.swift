@@ -63,7 +63,8 @@ final class ShotSession {
     @ObservationIgnored private var renderers: [CameraID: LensRenderer] = [:]
     @ObservationIgnored private var renderTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
-    /// The last fused result at full precision, kept for export.
+    /// The last merge at full precision, before any look is applied. Kept so
+    /// that changing the look, or exporting, doesn't re-run the merge.
     @ObservationIgnored private var fused: (image: CGImage, adjustments: RenderAdjustments, mode: FusionMode)?
 
     nonisolated static let previewDimension = 1800
@@ -223,10 +224,15 @@ final class ShotSession {
     /// Runs the lens merge. It takes a few seconds, so it waits briefly for
     /// slider movement to stop first, and a superseded run is discarded.
     private func renderFused(file: LRIFile, generation myGeneration: Int) {
-        let adjustments = adjustments
+        let look = adjustments.look
+        // The merge depends only on the raw development; the look is applied
+        // to its result.
+        let development = adjustments.withoutLook
+        let mode = effectiveFusionMode
+        let cached = (fused?.adjustments == development && fused?.mode == mode) ? fused?.image : nil
         isWorking = true
         isFullResolution = false
-        progressText = "Fusing…"
+        progressText = cached == nil ? "Fusing…" : nil
         if let reference = file.referenceImage, let renderer = renderers[reference.camera] {
             asShotTemperature = renderer.asShotTemperature
             asShotTint = renderer.asShotTint
@@ -234,36 +240,46 @@ final class ShotSession {
 
         renderTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: .milliseconds(300))
+                // Let slider movement settle: briefly for a look change, a
+                // little longer before a full merge.
+                try await Task.sleep(for: .milliseconds(cached == nil ? 300 : 60))
                 guard let self, self.generation == myGeneration else { return }
-                let mode = self.effectiveFusionMode
-                let note: WideFusion.Progress = { message, _ in
-                    Task { @MainActor [weak self] in
-                        if self?.generation == myGeneration { self?.progressText = message }
+
+                let merged: CGImage
+                if let cached {
+                    merged = cached
+                } else {
+                    let note: WideFusion.Progress = { message, _ in
+                        Task { @MainActor [weak self] in
+                            if self?.generation == myGeneration { self?.progressText = message }
+                        }
                     }
+                    let (float, report, tele) = try await Task.detached(priority: .userInitiated) { () -> (CGImage, FusionReport, TeleFusionReport?) in
+                        switch mode {
+                        case .wide:
+                            let result = try WideFusion.fuse(file: file, adjustments: development, progress: note)
+                            return (result.image, result.report, nil)
+                        case .full:
+                            let result = try TeleFusion.fuse(file: file, adjustments: development, progress: note)
+                            return (result.image, result.report.wide, result.report)
+                        }
+                    }.value
+                    guard self.generation == myGeneration else { return }
+                    self.fused = (float, development, mode)
+                    self.fusionReport = report
+                    self.teleReport = tele
+                    merged = float
                 }
-                let (float, report, tele) = try await Task.detached(priority: .userInitiated) { () -> (CGImage, FusionReport, TeleFusionReport?) in
-                    switch mode {
-                    case .wide:
-                        let result = try WideFusion.fuse(file: file, adjustments: adjustments, progress: note)
-                        return (result.image, result.report, nil)
-                    case .full:
-                        let result = try TeleFusion.fuse(file: file, adjustments: adjustments, progress: note)
-                        return (result.image, result.report.wide, result.report)
-                    }
-                }.value
+
                 let display = try await Task.detached(priority: .userInitiated) {
-                    try Self.displayImage(from: float)
+                    try Self.displayImage(from: Self.finished(merged, look: look))
                 }.value
                 guard self.generation == myGeneration else { return }
-                self.fused = (float, adjustments, mode)
-                self.fusionReport = report
-                self.teleReport = tele
                 self.image = display
                 self.isFullResolution = true
                 self.isWorking = false
                 self.progressText = nil
-                if adjustments.isIdentity, let small = try? Self.displayImage(from: float, maxDimension: 320) {
+                if development.isIdentity, look == nil, let small = try? Self.displayImage(from: merged, maxDimension: 320) {
                     Thumbnailer.shared.store(small, for: self.shotID, lens: "FUSED")
                 }
             } catch is CancellationError {
@@ -275,6 +291,12 @@ final class ShotSession {
                 self.progressText = nil
             }
         }
+    }
+
+    /// The merged image with the look applied (or as it is, with no look).
+    private nonisolated static func finished(_ merged: CGImage, look: LookSettings?) -> CGImage {
+        guard let look, let styled = LookRenderer.apply(look, to: merged) else { return merged }
+        return styled
     }
 
     private nonisolated static let displayContext = CIContext(options: [.cacheIntermediates: false])
@@ -346,19 +368,20 @@ final class ShotSession {
     /// changed since it was last computed.
     func exportFused(as format: ExportFormat, to destination: URL) async throws {
         guard let file else { return }
-        let adjustments = adjustments
+        let look = adjustments.look
+        let development = adjustments.withoutLook
         let mode = effectiveFusionMode
-        let cached = (fused?.adjustments == adjustments && fused?.mode == mode) ? fused?.image : nil
+        let cached = (fused?.adjustments == development && fused?.mode == mode) ? fused?.image : nil
         try await Task.detached(priority: .userInitiated) {
-            let float: CGImage
+            let merged: CGImage
             if let cached {
-                float = cached
+                merged = cached
             } else if mode == .full {
-                float = try TeleFusion.fuse(file: file, adjustments: adjustments).image
+                merged = try TeleFusion.fuse(file: file, adjustments: development).image
             } else {
-                float = try WideFusion.fuse(file: file, adjustments: adjustments).image
+                merged = try WideFusion.fuse(file: file, adjustments: development).image
             }
-            try Self.write(float, as: format, to: destination)
+            try Self.write(Self.finished(merged, look: look), as: format, to: destination)
         }.value
     }
 

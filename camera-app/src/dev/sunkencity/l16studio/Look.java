@@ -118,10 +118,11 @@ final class Look {
             int r = (p >> 16) & 0xff, g = (p >> 8) & 0xff, b = p & 0xff;
             int luma = (r * 54 + g * 183 + b * 19) >> 8;
             histogram[luma]++;
-            // Colour cast: average only reasonably neutral mid-tones. Strongly
-            // coloured or clipped pixels say nothing about the light.
+            // Colour cast: average only nearly grey mid-tones. The threshold
+            // is tight on purpose: with a looser one, a room with pale green
+            // walls read as a green cast and its whites came out lavender.
             int max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
-            if (luma > 40 && luma < 225 && max - min < 60) {
+            if (luma > 40 && luma < 225 && max - min < 26) {
                 sumR += r; sumG += g; sumB += b; counted++;
             }
         }
@@ -143,21 +144,22 @@ final class Look {
         float exact = (float) (Math.log(target) / Math.log(mid));
         look.gamma = Math.min(1.35f, Math.max(0.65f, 1 + (exact - 1) * 0.6f));
 
-        // Colour cast: nudge the neutral average towards grey, at most 12%
-        // per channel and only if enough of the picture was neutral.
-        if (counted > total / 20) {
+        // Colour cast: nudge the neutral average half-way towards grey, at
+        // most 8% per channel, and only if a good share of the picture (8%)
+        // was nearly grey to begin with.
+        if (counted > (long) total * 8 / 100) {
             double r = sumR / counted, g = sumG / counted, b = sumB / counted;
             double grey = (r + g + b) / 3;
-            look.gainR = limit((float) (grey / r), 0.6f);
-            look.gainG = limit((float) (grey / g), 0.6f);
-            look.gainB = limit((float) (grey / b), 0.6f);
+            look.gainR = limit((float) (grey / r), 0.5f);
+            look.gainG = limit((float) (grey / g), 0.5f);
+            look.gainB = limit((float) (grey / b), 0.5f);
         }
         return look;
     }
 
     private static float limit(float gain, float strength) {
         float g = 1 + (gain - 1) * strength;
-        return Math.min(1.12f, Math.max(0.88f, g));
+        return Math.min(1.08f, Math.max(0.92f, g));
     }
 
     private static int percentile(int[] histogram, int total, double fraction) {
@@ -185,8 +187,10 @@ final class Look {
         byte[] table = new byte[256];
         for (int i = 0; i < 256; i++) {
             float x = i / 255f;
-            x = (x - lo) / (hi - lo);
-            x = Math.max(0, Math.min(1, x * gain * exposureGain));
+            x = Math.max(0, Math.min(1, (x - lo) / (hi - lo) * exposureGain));
+            // Channel gains ease off towards white, so highlights stay
+            // neutral instead of clipping one channel before the others.
+            x = Math.max(0, Math.min(1, x * (1 + (gain - 1) * (1 - x * x))));
             x = (float) Math.pow(x, g);
 
             // Shadows and highlights: smooth bumps centred a third and two
