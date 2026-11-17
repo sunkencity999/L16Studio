@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import LRIKit
 
 struct RootView: View {
@@ -46,6 +47,11 @@ struct RootView: View {
             model.handleOpened(urls)
             return true
         }
+        // Files can change behind the app's back (a drive mounted, a shot
+        // moved or restored in Finder), so look again when it comes forward.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.library.filesMayHaveChanged()
+        }
         .alert("Something went wrong", isPresented: errorBinding) {
             Button("OK") { model.library.lastError = nil }
         } message: {
@@ -63,6 +69,9 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var library = model.library
+        // Reading the revision makes the counts below (which look at the
+        // disk) refresh whenever files may have changed.
+        let _ = library.filesRevision
         List(selection: filterBinding) {
             Section("Library") {
                 row("All Shots", "photo.on.rectangle.angled", .all)

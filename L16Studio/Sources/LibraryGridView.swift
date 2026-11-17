@@ -18,7 +18,7 @@ struct LibraryGridView: View {
                         spacing: 14
                     ) {
                         ForEach(shots) { shot in
-                            ShotCell(shot: shot, isSelected: library.selection.contains(shot.id))
+                            ShotCell(shot: shot, isSelected: library.selection.contains(shot.id), revision: library.filesRevision)
                                 .gesture(TapGesture(count: 2).onEnded { model.open(shot) })
                                 .simultaneousGesture(TapGesture().onEnded { select(shot) })
                                 .contextMenu { menu(for: shot) }
@@ -86,7 +86,13 @@ struct LibraryGridView: View {
 struct ShotCell: View {
     let shot: Shot
     let isSelected: Bool
+    /// `LibraryStore.filesRevision`: a change means "look at the disk again".
+    let revision: Int
     @State private var thumbnail: CGImage?
+    /// Whether the file was there the last time we looked. Kept as state so
+    /// the tile and its loading task always agree; reading the disk in
+    /// `body` would let them drift apart.
+    @State private var isPresent = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -99,7 +105,7 @@ struct ShotCell: View {
                             Image(decorative: thumbnail, scale: 1)
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
-                        } else if shot.exists {
+                        } else if isPresent {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "exclamationmark.triangle")
@@ -138,8 +144,9 @@ struct ShotCell: View {
                 .lineLimit(1)
         }
         .contentShape(Rectangle())
-        .task(id: shot.id) {
-            guard shot.exists else { return }
+        .task(id: "\(shot.id)-\(revision)") {
+            isPresent = shot.exists
+            guard isPresent, thumbnail == nil else { return }
             thumbnail = await Thumbnailer.shared.thumbnail(for: shot)
         }
     }

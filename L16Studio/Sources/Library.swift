@@ -47,6 +47,12 @@ final class LibraryStore {
     var thumbnailSize: Double = 220
     var importStatus: String?
     var lastError: String?
+    /// Bumped whenever files on disk may have changed (an import finished,
+    /// the window became active again), so tiles re-check their file and
+    /// reload a thumbnail they previously couldn't get.
+    private(set) var filesRevision = 0
+
+    func filesMayHaveChanged() { filesRevision += 1 }
 
     static let supportFolder: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -112,6 +118,8 @@ final class LibraryStore {
         let fresh = candidates.filter { !known.contains($0.path) }
         guard !fresh.isEmpty else {
             importStatus = candidates.isEmpty ? "No .lri files found" : "Already in the library"
+            // A known shot may have just been re-downloaded after going missing.
+            filesMayHaveChanged()
             return []
         }
 
@@ -127,6 +135,7 @@ final class LibraryStore {
             }
         }
         save()
+        filesMayHaveChanged()
         importStatus = added.isEmpty ? nil : "Imported \(added.count) shot\(added.count == 1 ? "" : "s")"
         return added
     }
