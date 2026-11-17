@@ -56,6 +56,7 @@ public class GalleryActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(buildLayout());
+        WakeService.startIfAllowed(this);
     }
 
     @Override
@@ -126,6 +127,18 @@ public class GalleryActivity extends Activity {
         TextView sleep = pill("Screen off", false);
         sleep.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { SleepActivity.sleep(GalleryActivity.this); }
+        });
+        // Long press: skip the tap-to-wake stage and sleep at once (for
+        // putting the camera in a bag). Lift to wake still applies.
+        sleep.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                if (SleepActivity.isAllowed(GalleryActivity.this)) {
+                    SleepActivity.sleepNow(GalleryActivity.this);
+                } else {
+                    SleepActivity.sleep(GalleryActivity.this);
+                }
+                return true;
+            }
         });
         LinearLayout.LayoutParams sleepParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);

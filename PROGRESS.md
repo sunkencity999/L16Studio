@@ -449,3 +449,16 @@ needs root for one boot; not done.
   archive.mozilla.org, signed by Mozilla Release Engineering (certificate
   SHA-256 a78b62a5...319b04), minSdk 21. It starts without crashing; page
   loading was not checked because the camera was PIN-locked at the time.
+- **Lift to wake must always be running** (0.2.1). An unplugged test failed
+  because `adb install -r` had stopped `WakeService` and it was only started
+  by Screen off or at boot, while the screen had gone off by the lock
+  screen's own 10 s timeout. It now also starts on `MY_PACKAGE_REPLACED`,
+  when the device-admin permission is enabled, and when the gallery opens.
+  Verified: after an update the service is back without opening the app.
+  Still to confirm: that it wakes the camera when unplugged and suspended
+  (on USB the processor never fully suspends, so plugged-in tests don't
+  prove this; if it fails, hold a partial wake lock while armed).
+- Long-pressing Screen off skips the nap and sleeps at once.
+- The camera did not power off when unplugged (uptime was continuous, and
+  the battery reads healthy: 100%, 4,269 mAh full charge). The cold-start
+  test of the power button therefore hasn't happened yet.

@@ -27,9 +27,10 @@ import android.os.SystemClock;
  *    bag, lifting a hand off it) also wakes it, and so that a tilt while the
  *    sensor is covered is ignored: a camera jostling inside a bag stays asleep.
  *
- * Nothing is listened to while the screen is on. The service runs whenever
- * the app's Screen off control is in use, because turning the screen off on a
- * camera with no working power button is only safe if it can be woken again.
+ * Nothing is listened to while the screen is on. The service runs all the
+ * time once the user has allowed the app's screen controls, because the
+ * screen also turns off by itself (the timeout), and a camera with no
+ * working power button must always have a way to be woken.
  */
 public class WakeService extends Service implements SensorEventListener {
     /**
@@ -148,10 +149,20 @@ public class WakeService extends Service implements SensorEventListener {
         lock.acquire(3000);
     }
 
-    /** Restarts lift-to-wake after the camera boots, if Screen off is in use. */
+    /** Starts the service if the user has enabled the screen controls. */
+    static void startIfAllowed(Context context) {
+        if (SleepActivity.isAllowed(context)) start(context);
+    }
+
+    /**
+     * Brings lift-to-wake back after the camera boots and after the app is
+     * updated (an update stops the app's services). The screen can go off by
+     * its own timeout at any moment, not only through Screen off, so the
+     * service has to be running all the time, not just after Screen off.
+     */
     public static class BootReceiver extends BroadcastReceiver {
         @Override public void onReceive(Context context, Intent intent) {
-            if (SleepActivity.isAllowed(context)) start(context);
+            startIfAllowed(context);
         }
     }
 }
