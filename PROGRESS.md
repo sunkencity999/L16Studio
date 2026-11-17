@@ -421,3 +421,28 @@ at the time of writing: that tilting or uncovering actually wakes it.
 A stronger fix would make the shutter half press a wake key via a key-layout
 override in `/data/system/devices/keylayout/` (`key 528 FOCUS WAKE`), which
 needs root for one boot; not done.
+
+### Tap to wake, and the editor's compare bug (2026-11-16)
+
+- **Tap to wake** cannot work in real sleep: there are no wake-gesture nodes
+  for the `dsx` (screen) or `touchpad` (zoom strip) controllers and
+  `dumpsys power` reports `mDoubleTapWakeEnabled=false`. So Screen off now
+  starts with `NapActivity`: black, `screenBrightness = 0` (clamped by the
+  system to its minimum, 10/255), `FLAG_KEEP_SCREEN_ON`, any touch or key
+  finishes it. After `DEFAULT_SECONDS` (120) it calls `SleepActivity.sleepNow`
+  for real sleep. `--ei nap_seconds N` on the SleepActivity intent shortens it
+  for testing. Verified over adb: nap at brightness 10, a tap returns to the
+  previous screen with brightness restored, a 6 s timer ends in
+  `Dozing` / display OFF. The user confirmed lift to wake works.
+- **Hold to compare did nothing** because `Allocation.createFromBitmap(rs,
+  bitmap)` shares the bitmap's memory and the render passes wrote back into
+  it: the working "original" became the edited picture, and every re-render
+  stacked the look on the previous one. Fixed with an explicit
+  `USAGE_SCRIPT` (private copy). Verified with screenshots before, during and
+  after a long press, and after switching looks away and back.
+- **Browser**: the camera's WebView is Chromium 52 and its browser Chromium
+  54 (2016), security patch level 2017-06, no Play Store. A browser written
+  on that WebView would inherit its limits. Current Firefox needs Android 8;
+  Firefox 143 (September 2025) is the last release for Android 5-7 and brings
+  its own engine and certificate store. Not installed; awaiting the owner's
+  decision.

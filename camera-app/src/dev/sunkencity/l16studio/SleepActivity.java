@@ -13,8 +13,9 @@ import android.widget.Toast;
  *
  * It exists for cameras whose power button no longer works: it shows up in
  * the app list as "Screen off", and the gallery has a button that does the
- * same. It has no screen of its own; it acts and closes. Waking is handled
- * by {@link WakeService} (lift to wake), which this always starts first.
+ * same. It has no screen of its own; it acts and closes. It starts with a
+ * short {@link NapActivity} (tap to wake), then really sleeps, after which
+ * {@link WakeService} (lift to wake) is the way back.
  *
  * The first time, Android asks the user to allow the app to lock the screen.
  * Starting it with the extra "deactivate" set to true gives that permission
@@ -29,17 +30,36 @@ public class SleepActivity extends Activity {
         return policy != null && policy.isAdminActive(new ComponentName(context, AdminReceiver.class));
     }
 
-    /** Turns the screen off, or asks for permission first. */
+    /**
+     * What the Screen off controls do: a short nap in which a tap wakes the
+     * camera, then real sleep. Asks for permission first if needed.
+     */
     static void sleep(Context context) {
-        DevicePolicyManager policy = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName admin = new ComponentName(context, AdminReceiver.class);
-        if (policy == null) return;
-        if (policy.isAdminActive(admin)) {
-            // Never put the camera to sleep without a way to wake it.
-            WakeService.start(context);
-            policy.lockNow();
+        sleep(context, NapActivity.DEFAULT_SECONDS);
+    }
+
+    static void sleep(Context context, int napSeconds) {
+        if (!isAllowed(context)) {
+            askPermission(context);
             return;
         }
+        Intent nap = new Intent(context, NapActivity.class);
+        nap.putExtra(NapActivity.EXTRA_SECONDS, napSeconds);
+        if (!(context instanceof Activity)) nap.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(nap);
+    }
+
+    /** Really turns the screen off now (the end of the nap). */
+    static void sleepNow(Context context) {
+        DevicePolicyManager policy = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+        if (policy == null || !isAllowed(context)) return;
+        // Never put the camera to sleep without a way to wake it.
+        WakeService.start(context);
+        policy.lockNow();
+    }
+
+    private static void askPermission(Context context) {
+        ComponentName admin = new ComponentName(context, AdminReceiver.class);
         Intent ask = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
         ask.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin);
         ask.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
@@ -58,7 +78,7 @@ public class SleepActivity extends Activity {
             if (policy != null && policy.isAdminActive(admin)) policy.removeActiveAdmin(admin);
             WakeService.stop(this);
         } else {
-            sleep(this);
+            sleep(this, getIntent().getIntExtra(NapActivity.EXTRA_SECONDS, NapActivity.DEFAULT_SECONDS));
         }
         finish();
     }

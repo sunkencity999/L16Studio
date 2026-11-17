@@ -62,6 +62,15 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".NapActivity"
+            android:theme="@style/AppTheme.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="dev.sunkencity.l16studio.sleep"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <receiver
             android:name=".AdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN">

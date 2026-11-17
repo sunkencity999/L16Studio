@@ -10,7 +10,8 @@ This package puts the L16 Studio app on a Light L16. The app adds:
   - a button to Light's own camera app, which still takes the pictures
   - "Screen off" and lift to wake, for cameras whose power button has worn
     out: a button, and a second icon in the app list, put the camera to
-    sleep, and picking it up or uncovering it wakes it. The camera asks you
+    sleep. A tap wakes it during the first two minutes; after that, picking
+    it up or uncovering it does. The camera asks you
     to allow the screen-off part the first time; it is the only special
     permission the app uses, and the uninstaller gives it back.
 

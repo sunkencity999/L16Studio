@@ -113,8 +113,10 @@ is an Android 6 device underneath):
 - A button to jump to Light's own camera app, which still does the shooting.
 - **Screen off and lift to wake**, for cameras whose power button no longer
   works. A button in the gallery, and a second icon in the app list, put the
-  camera to sleep; picking it up or uncovering it wakes it again (using the
-  tilt and proximity sensors, which work while it sleeps). Android asks you
+  camera to sleep. For the first two minutes the screen is only blacked out,
+  so a tap wakes it instantly; after that it really sleeps, and picking it up
+  or uncovering it wakes it (using the tilt and proximity sensors, which work
+  while it sleeps; the touch panel does not). Android asks you
   to allow the screen-off part the first time (the app registers as a device
   administrator with one permission, locking the screen).
 
