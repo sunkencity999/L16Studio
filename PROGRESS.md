@@ -353,3 +353,33 @@ Checked: all seven styles on the fused room shot from the command line
 and on the 52 MP fusion. Not checked: clicking the style buttons and sliders
 in the app (the look was set through the library file for the test), and
 exports with a look applied.
+
+## Deployment package for other cameras (2026-11-16)
+
+`scripts/package-camera.sh` builds `build/L16Studio-camera-<version>.zip`
+(about 60 KB): the APK, `deploy/install.sh` (macOS/Linux), `install.command`
+(double-click on a Mac), `install.ps1` + `install.bat` (Windows), a plain-text
+README and the licence.
+
+The installer uses the computer's adb or downloads Google's platform-tools
+into the package folder, waits for the camera (with instructions for "no
+device" and "unauthorized"), prefers a device whose `ro.product.model` is
+`L16` and asks before touching anything else, installs with `adb install -r`,
+and opens the app. `--uninstall`, `--replace` (for a copy signed with another
+key), `--yes`.
+
+A stock L16 cannot be set up without one manual step: USB debugging has to be
+enabled on the camera itself. Nothing in the package needs root or touches the
+camera's system.
+
+Tested on macOS against the real camera: fresh install from an unpacked zip
+with no adb on PATH (it downloaded platform-tools), uninstall, repeat
+uninstall, install over an existing copy, bad option; and with a stub adb:
+no device, unauthorized, non-L16 device declined. Not tested: Linux, the
+Windows scripts (written but never run), the `--replace` path, and a camera
+that has never had USB debugging enabled (the menu wording in the
+instructions is what worked on this unit).
+
+The APK is signed with `camera-app/dev.keystore` (gitignored, generated on
+first build, password in `build.sh`). It only exists on the build machine;
+losing it means later versions cannot update earlier installs in place.

@@ -112,8 +112,32 @@ is an Android 6 device underneath):
   switched on, so use it on a network you trust.
 - A button to jump to Light's own camera app, which still does the shooting.
 
-Build and install it over USB (USB debugging must be enabled on the camera:
-Settings → About → tap Build number seven times, then Developer options):
+### Installing it on a camera
+
+The easy way is the ready-made package, `L16Studio-camera-<version>.zip`:
+unzip it and run the installer for your computer (`install.command` on a Mac,
+`install.sh` on Linux, `install.bat` on Windows). It fetches Google's adb tool
+if the computer doesn't have it, waits for the camera, tells you how to switch
+on USB debugging (the one step that has to be done by hand, on the camera),
+checks the device really is an L16, and installs and opens the app. It
+installs one ordinary app: nothing is rooted or flashed, and
+`install.sh --uninstall` removes it again.
+
+To make the package yourself:
+
+```sh
+scripts/package-camera.sh     # -> build/L16Studio-camera-<version>.zip
+```
+
+The APK is signed with `camera-app/dev.keystore`, which is created on the
+first build and is not in the repository. Keep it backed up: an update only
+installs over an earlier copy when it is signed with the same key.
+
+### Building it
+
+To build and install straight from source over USB (USB debugging must be
+enabled on the camera: Settings → About → tap Build number seven times, then
+Developer options):
 
 ```sh
 brew install openjdk@17 android-platform-tools
@@ -172,7 +196,9 @@ Package.swift        The app as a SwiftPM executable
 L16Studio/           SwiftUI app (library, viewer, inspector, camera import)
 LRIKit/              Standalone Swift package: .lri parsing, DNG/colour
                      pipeline, lens renderer, lriprobe CLI
-camera-app/          The on-camera Android app (gallery, Wi-Fi transfer)
+camera-app/          The on-camera Android app (gallery, editor, Wi-Fi transfer)
+deploy/              Installers and instructions for the camera package
+scripts/package-camera.sh  Builds the camera package zip
 scripts/build-app.sh Builds and assembles L16Studio.app
 install.sh           Build + install to /Applications, plus CLI launcher
 icon-gen/            CoreGraphics app-icon generator (kept for regeneration)
