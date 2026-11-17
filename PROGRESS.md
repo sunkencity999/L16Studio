@@ -444,5 +444,8 @@ needs root for one boot; not done.
   54 (2016), security patch level 2017-06, no Play Store. A browser written
   on that WebView would inherit its limits. Current Firefox needs Android 8;
   Firefox 143 (September 2025) is the last release for Android 5-7 and brings
-  its own engine and certificate store. Not installed; awaiting the owner's
-  decision.
+  its own engine and certificate store. Installed on the development camera
+  at the owner's request: `fenix-143.0.4.multi.android-arm64-v8a.apk` from
+  archive.mozilla.org, signed by Mozilla Release Engineering (certificate
+  SHA-256 a78b62a5...319b04), minSdk 21. It starts without crashing; page
+  loading was not checked because the camera was PIN-locked at the time.
