@@ -162,7 +162,7 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
 
         if CommandLine.arguments.contains("--fuse") {
             // Stage-one fusion: merge the lenses that share the reference's focal length.
-            let (fused, report) = try WideFusion.fuse(file: file) { message, fraction in
+            let (fused, report) = try WideFusion.fuse(file: file, monochrome: CommandLine.arguments.contains("--mono")) { message, fraction in
                 print(String(format: "  fuse %3.0f%%  %@", fraction * 100, message))
             }
             let outURL = url.deletingLastPathComponent()

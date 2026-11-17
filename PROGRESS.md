@@ -605,3 +605,19 @@ this and the auto-import test.
   darker than before (the shoulder starts there).
 - Only the merge has this. A single lens shown or exported on its own still
   clips. `L16_NO_HIGHLIGHTS=1` switches it off for comparison.
+
+### Monochrome-lens merge (2026-11-17)
+
+- `WideFusion.fuse(monochrome: true)` uses the monochrome module (A2 on the
+  shots seen) as the base, reduces each same-view colour frame to grey,
+  aligns and merges them, and returns grey in all three channels.
+- Shot 3 at 1:1 against the colour merge converted to grey: clearly less
+  grain on plain surfaces, lettering as sharp or sharper. Colour lenses were
+  accepted over 8-32% of the frame (a close subject, so parallax is large).
+- Tonal rendering is the sensor's own: a red key comes out dark.
+- The base is a module at full gain, so it has no highlight headroom of its
+  own; recovered highlights come only from A1 where it is accepted.
+- In the app it is a third choice ("Mono lens") in the fusion picker, shown
+  when the shot has a monochrome frame, and it exports like the other
+  merges. The picker and export were built but not clicked through.
+- `lriprobe --fuse --mono`.

@@ -49,6 +49,11 @@ below) but not a port of any existing project's source.
   shutter, waits for the camera to finish writing the shot, brings it into
   the library and opens it. The transfer runs at USB 2 speed, so a shot
   takes about half a minute to arrive.
+- **True black and white**: a "Mono lens" merge built on the camera's
+  monochrome module, which has no colour filter. Every pixel is a real
+  measurement and it gathers more light, so the result is visibly cleaner
+  than a colour picture turned grey. The colour lenses are merged in to
+  lower noise further.
 - **Highlight recovery in the merge**: the camera exposes its main lens a
   stop under the others, so that lens holds detail in bright areas the
   others have lost. The merge now uses it: skies, windows and lamps that

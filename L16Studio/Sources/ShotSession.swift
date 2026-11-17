@@ -37,6 +37,8 @@ final class ShotSession {
         case wide
         /// Wide merge plus telephoto detail, at the shot's focal length.
         case full
+        /// A black-and-white picture built on the monochrome lens.
+        case mono
         var id: String { rawValue }
     }
     /// Full fusion needs several GB of memory at 52 MP, so machines with
@@ -46,8 +48,16 @@ final class ShotSession {
     }
     /// True when the shot has telephoto frames to add.
     private(set) var canFuseFull = false
+    /// True when the shot has a frame from the monochrome lens.
+    private(set) var canFuseMono = false
     /// The mode actually in effect (full needs telephoto frames).
-    var effectiveFusionMode: FusionMode { canFuseFull ? fusionMode : .wide }
+    var effectiveFusionMode: FusionMode {
+        switch fusionMode {
+        case .wide: .wide
+        case .full: canFuseFull ? .full : .wide
+        case .mono: canFuseMono ? .mono : .wide
+        }
+    }
 
     var selectedLens: CameraID? {
         didSet { if oldValue != selectedLens, !showsFused { image = nil; scheduleRender() } }
@@ -69,7 +79,13 @@ final class ShotSession {
 
     nonisolated static let previewDimension = 1800
     /// Fit token for the fused image (lenses use their module number).
-    var fusedToken: Int { effectiveFusionMode == .full ? -2 : -1 }
+    var fusedToken: Int {
+        switch effectiveFusionMode {
+        case .wide: -1
+        case .full: -2
+        case .mono: -3
+        }
+    }
 
     init(shot: Shot) {
         shotID = shot.id
@@ -101,6 +117,7 @@ final class ShotSession {
             // Wide lenses first, then telephoto; within a group by module number.
             lenses = file.images.sorted { $0.camera.rawValue < $1.camera.rawValue }
             canFuseFull = TeleFusion.canFuse(file)
+            canFuseMono = WideFusion.hasMonochromeLens(file)
             selectedLens = file.metadata.referenceCamera ?? lenses.first?.camera
             buildLensThumbnails(file: file)
         } catch {
@@ -262,6 +279,9 @@ final class ShotSession {
                         case .full:
                             let result = try TeleFusion.fuse(file: file, adjustments: development, progress: note)
                             return (result.image, result.report.wide, result.report)
+                        case .mono:
+                            let result = try WideFusion.fuse(file: file, adjustments: development, monochrome: true, progress: note)
+                            return (result.image, result.report, nil)
                         }
                     }.value
                     guard self.generation == myGeneration else { return }
@@ -279,7 +299,7 @@ final class ShotSession {
                 self.isFullResolution = true
                 self.isWorking = false
                 self.progressText = nil
-                if development.isIdentity, look == nil, let small = try? Self.displayImage(from: merged, maxDimension: 320) {
+                if development.isIdentity, look == nil, mode != .mono, let small = try? Self.displayImage(from: merged, maxDimension: 320) {
                     Thumbnailer.shared.store(small, for: self.shotID, lens: "FUSED")
                 }
             } catch is CancellationError {
@@ -380,7 +400,7 @@ final class ShotSession {
                 // converter's job from here.
                 let linear = mode == .full
                     ? try TeleFusion.fuse(file: file, adjustments: development, sceneLinear: true).image
-                    : try WideFusion.fuse(file: file, adjustments: development, sceneLinear: true).image
+                    : try WideFusion.fuse(file: file, adjustments: development, sceneLinear: true, monochrome: mode == .mono).image
                 try DNGWriter.writeLinear(image: linear, metadata: file.metadata).write(to: destination, options: .atomic)
                 return
             }
@@ -390,7 +410,7 @@ final class ShotSession {
             } else if mode == .full {
                 merged = try TeleFusion.fuse(file: file, adjustments: development).image
             } else {
-                merged = try WideFusion.fuse(file: file, adjustments: development).image
+                merged = try WideFusion.fuse(file: file, adjustments: development, monochrome: mode == .mono).image
             }
             // Either merge covers the wide lenses' field of view.
             let details = file.metadata.imageProperties(focalLength35: 28)

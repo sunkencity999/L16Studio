@@ -137,10 +137,11 @@ struct FusionInfoSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionHeader(title: "Fusion")
-            if session.canFuseFull {
+            if session.canFuseFull || session.canFuseMono {
                 Picker("Result", selection: $session.fusionMode) {
                     Text("Wide merge").tag(ShotSession.FusionMode.wide)
-                    Text("Full detail").tag(ShotSession.FusionMode.full)
+                    if session.canFuseFull { Text("Full detail").tag(ShotSession.FusionMode.full) }
+                    if session.canFuseMono { Text("Mono lens").tag(ShotSession.FusionMode.mono) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -168,6 +169,8 @@ struct FusionInfoSection: View {
             }
             Text(session.effectiveFusionMode == .full
                  ? "The wide lenses are merged and cropped to the shot's focal length, then each telephoto lens adds finer detail where it lines up. Far scenes gain the most; close objects mostly fall back to the wide merge."
+                 : session.effectiveFusionMode == .mono
+                 ? "A black-and-white picture built on the camera's monochrome lens, which has no colour filter: every pixel is a real measurement and it gathers more light, so it is cleaner than a colour picture turned grey. The colour lenses are merged in to lower noise further. Tones differ a little from a colour conversion (reds come out darker)."
                  : "Lenses with the same focal length are aligned to the reference and merged: lower noise, and the sharpest detail from each. A lens is left out wherever it doesn't line up, such as around close objects.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)

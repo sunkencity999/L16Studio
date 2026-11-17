@@ -49,20 +49,78 @@ public enum WideFusion {
         file: LRIFile,
         adjustments: RenderAdjustments = .none,
         sceneLinear: Bool = false,
+        monochrome: Bool = false,
         progress: Progress? = nil
     ) throws -> (image: CGImage, report: FusionReport) {
-        let (planes, report) = try fusePlanes(file: file, adjustments: adjustments, sceneLinear: sceneLinear, progress: progress)
+        let (planes, report) = try fusePlanes(
+            file: file, adjustments: adjustments, sceneLinear: sceneLinear, monochrome: monochrome, progress: progress)
         guard let image = planes.makeCGImage() else { throw ImageRendererError.renderFailed }
         progress?("Done", 1)
         return (image, report)
+    }
+
+    /// True when the shot has a frame from the monochrome module.
+    public static func hasMonochromeLens(_ file: LRIFile) -> Bool {
+        file.images.contains { $0.sensor == .ar1335Mono }
+    }
+
+    /// A black-and-white picture built on the monochrome module. That
+    /// sensor has no colour filter, so every pixel is a real measurement
+    /// (nothing is interpolated from neighbours) and it gathers more light.
+    /// The colour lenses of the same view are aligned to it and averaged in
+    /// to lower noise further.
+    static func fuseOntoMono(
+        file: LRIFile,
+        adjustments: RenderAdjustments,
+        sceneLinear: Bool,
+        progress: Progress?
+    ) throws -> (planes: RGBPlanes, report: FusionReport) {
+        let start = Date()
+        guard let mono = file.images.first(where: { $0.sensor == .ar1335Mono }) else { throw FusionError.noReference }
+        let others = file.images.filter {
+            $0.cfaPattern != nil && $0.camera.focalLength == mono.camera.focalLength
+                && $0.width == mono.width && $0.height == mono.height
+        }
+        let steps = Double(others.count + 2)
+        progress?("Developing \(mono.camera.label)", 0)
+        let ref = try LensRenderer(image: mono, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
+        let refLuma = ref.alignmentLuma()
+        var merger = DetailMerger(reference: ref)
+        var frames: [FusionReport.Frame] = []
+        for (index, lens) in others.enumerated() {
+            progress?("Aligning \(lens.camera.label)", Double(index + 1) / steps)
+            var source = try LensRenderer(image: lens, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
+            // Reduce the colour frame to grey before merging, so no colour
+            // noise is carried into the result.
+            let grey = source.luma()
+            source = RGBPlanes(r: grey, g: grey, b: grey)
+            let field = TileAligner.align(reference: refLuma, target: source.alignmentLuma()).smoothed()
+            var (warped, valid) = field.warp(source)
+            let trust = field.reliability(width: valid.width, height: valid.height)
+            for i in 0..<valid.data.count { valid.data[i] *= trust.data[i] }
+            let coverage = merger.add(&warped, valid: valid)
+            let magnitudes = zip(field.dx, field.dy).map { ($0 * $0 + $1 * $1).squareRoot() }.sorted()
+            frames.append(FusionReport.Frame(
+                camera: lens.camera,
+                medianShift: magnitudes.isEmpty ? 0 : magnitudes[magnitudes.count / 2],
+                maxShift: magnitudes.last ?? 0,
+                coverage: coverage))
+        }
+        progress?("Merging", (steps - 1) / steps)
+        let merged = merger.result()
+        let grey = merged.luma()
+        let report = FusionReport(reference: mono.camera, frames: frames, seconds: Date().timeIntervalSince(start))
+        return (RGBPlanes(r: grey, g: grey, b: grey), report)
     }
 
     static func fusePlanes(
         file: LRIFile,
         adjustments: RenderAdjustments,
         sceneLinear: Bool = false,
+        monochrome: Bool = false,
         progress: Progress?
     ) throws -> (planes: RGBPlanes, report: FusionReport) {
+        if monochrome { return try fuseOntoMono(file: file, adjustments: adjustments, sceneLinear: sceneLinear, progress: progress) }
         let start = Date()
         guard let reference = file.referenceImage ?? file.images.first(where: { $0.cfaPattern != nil }),
               reference.cfaPattern != nil else {
