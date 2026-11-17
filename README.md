@@ -114,7 +114,8 @@ is an Android 6 device underneath):
 
 ### Installing it on a camera
 
-The easy way is the ready-made package, `L16Studio-camera-<version>.zip`:
+The easy way is the ready-made package, `L16Studio-camera-<version>.zip`,
+from the [releases page](https://github.com/sunkencity999/L16Studio/releases):
 unzip it and run the installer for your computer (`install.command` on a Mac,
 `install.sh` on Linux, `install.bat` on Windows). It fetches Google's adb tool
 if the computer doesn't have it, waits for the camera, tells you how to switch
