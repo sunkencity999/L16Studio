@@ -5,6 +5,15 @@ struct CameraImportView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
+    private enum Transport: String, CaseIterable, Identifiable {
+        case usb = "USB cable", wifi = "Wi-Fi"
+        var id: String { rawValue }
+    }
+
+    /// Remembered between uses of the sheet.
+    @AppStorage("cameraTransport") private var transport: Transport = .usb
+    @AppStorage("cameraWiFiAddress") private var wifiAddress = ""
+    @State private var finder = WiFiCameraFinder()
     @State private var files: [CameraLink.RemoteFile] = []
     @State private var chosen: Set<Int> = []
     @State private var isLoading = true
@@ -24,6 +33,32 @@ struct CameraImportView: View {
                     .help("Look for the camera again")
             }
 
+            Picker("Connection", selection: $transport) {
+                ForEach(Transport.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(isImporting)
+            .onChange(of: transport) { Task { await refresh() } }
+
+            if transport == .wifi {
+                HStack {
+                    TextField("Camera address, e.g. 192.168.1.20", text: $wifiAddress)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { Task { await refresh() } }
+                    Button("Connect") { Task { await refresh() } }
+                        .disabled(wifiAddress.trimmingCharacters(in: .whitespaces).isEmpty || isImporting)
+                }
+                if let found = finder.addresses.first, found != wifiAddress {
+                    Button("Use the camera found on this network (\(found))") {
+                        wifiAddress = found
+                        Task { await refresh() }
+                    }
+                    .buttonStyle(.link)
+                    .font(.callout)
+                }
+            }
+
             content
 
             HStack {
@@ -41,8 +76,12 @@ struct CameraImportView: View {
             }
         }
         .padding(20)
-        .frame(width: 520, height: 440)
-        .task { await refresh() }
+        .frame(width: 520, height: 500)
+        .task {
+            finder.start()
+            await refresh()
+        }
+        .onDisappear { finder.stop() }
     }
 
     @ViewBuilder
@@ -99,7 +138,13 @@ struct CameraImportView: View {
         isLoading = true
         problem = nil
         do {
-            files = try await CameraLink.listShots()
+            if transport == .wifi, wifiAddress.trimmingCharacters(in: .whitespaces).isEmpty {
+                files = []
+                problem = "On the camera, open L16 Studio and turn on Wi-Fi transfer, then enter the address it shows."
+                isLoading = false
+                return
+            }
+            files = try await CameraLink.listShots(from: transport == .wifi ? .wifi(wifiAddress) : .usb)
             chosen = Set(files.filter { !alreadyHave($0) }.map(\.id))
         } catch {
             files = []

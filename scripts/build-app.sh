@@ -47,6 +47,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSApplicationCategoryType</key><string>public.app-category.photography</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <!-- Wi-Fi import talks plain HTTP to the camera on the local network. -->
+    <key>NSAppTransportSecurity</key>
+    <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+    <key>NSLocalNetworkUsageDescription</key><string>L16 Studio looks for your Light L16 on the local network to import shots over Wi-Fi.</string>
+    <key>NSBonjourServices</key><array><string>_l16studio._tcp</string></array>
     <key>UTImportedTypeDeclarations</key>
     <array>
         <dict>

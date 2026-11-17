@@ -14,7 +14,8 @@ below) but not a port of any existing project's source.
 
 - **Library**: imports `.lri` shots into a browsable grid with flags, star
   ratings and filters. Files on disk are referenced where they are.
-- **Camera import**: pulls shots straight off an L16 plugged in over USB.
+- **Camera import**: pulls shots straight off an L16, over USB or over Wi-Fi
+  (with the on-camera app below).
 - **Viewer**: every lens the camera fired for a shot (the L16 fires 10 of
   its 16 modules per shot) in a filmstrip, with native zoom and pan.
 - **Colour**: uses Light's own per-lens factory calibration and the white
@@ -37,8 +38,10 @@ Light's full fusion pipeline; this project is building its own in stages.
 - macOS 14 (Sonoma) or later
 - Xcode 15+ installed (its toolchain compiles SwiftUI). It does not need to
   be the selected developer directory or set up beyond installing it.
-- For camera import: `brew install libmtp` (macOS has no built-in support
-  for the file-transfer protocol the camera uses)
+- For camera import over USB: `brew install android-platform-tools` (used
+  when USB debugging is enabled on the camera) and/or `brew install libmtp`
+  (for the camera's file-transfer mode; macOS has no built-in MTP support).
+  Wi-Fi import needs neither.
 
 ## Install
 
@@ -68,14 +71,40 @@ the same way, since `.lri` is registered as a document type.
 Inside the app:
 
 - Drag `.lri` files or folders onto the window, or **File → Import…** (⌘I).
-- **File → Import from Camera…** (⇧⌘I): plug the L16 in directly (not through
-  a hub), wake it, and set its USB mode to file transfer.
+- **File → Import from Camera…** (⇧⌘I). By cable: plug the L16 in directly
+  (not through a hub) and wake it, with either USB debugging enabled or its
+  USB mode set to file transfer. By Wi-Fi: on the camera, open L16 Studio and
+  turn on Wi-Fi transfer, then pick Wi-Fi in the sheet (the camera is found
+  automatically on the same network, or enter the address it shows).
 - Double-click a shot to open it. Left/right arrows change lens, Esc returns
   to the library, double-click the image to switch between fit and 100%.
 - Adjustments and export are in the inspector on the right (⌥⌘I).
 
 Imported camera shots are stored in `~/Pictures/L16 Studio`. The library
 index lives in `~/Library/Application Support/L16Studio`.
+
+## The on-camera app
+
+`camera-app/` is a small Android app that runs on the L16 itself (the camera
+is an Android 6 device underneath):
+
+- **Gallery** of the shots on the camera, with a full-screen viewer (pinch or
+  double-tap to zoom, swipe between shots) and delete.
+- **Wi-Fi transfer**: a switch that serves the shots on the local network, so
+  L16Studio on the Mac, or any browser at the address shown, can pull them
+  without a cable. It is read-only, unauthenticated and only runs while
+  switched on, so use it on a network you trust.
+- A button to jump to Light's own camera app, which still does the shooting.
+
+Build and install it over USB (USB debugging must be enabled on the camera:
+Settings → About → tap Build number seven times, then Developer options):
+
+```sh
+brew install openjdk@17 android-platform-tools
+brew install --cask android-commandlinetools
+sdkmanager "platforms;android-23" "build-tools;34.0.0"
+camera-app/build.sh --install
+```
 
 ## Building from source (without install.sh)
 
@@ -127,6 +156,7 @@ Package.swift        The app as a SwiftPM executable
 L16Studio/           SwiftUI app (library, viewer, inspector, camera import)
 LRIKit/              Standalone Swift package: .lri parsing, DNG/colour
                      pipeline, lens renderer, lriprobe CLI
+camera-app/          The on-camera Android app (gallery, Wi-Fi transfer)
 scripts/build-app.sh Builds and assembles L16Studio.app
 install.sh           Build + install to /Applications, plus CLI launcher
 icon-gen/            CoreGraphics app-icon generator (kept for regeneration)

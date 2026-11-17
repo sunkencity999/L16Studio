@@ -262,3 +262,34 @@ would sharpen the result further.
   the light of a colour module's green channel); with that, it is accepted
   over 63% / 22% / 35% of the room / keyboard / near-to-far shots. Visible
   effect is small: slightly cleaner shadows, no artifacts seen.
+
+## Camera link and the on-camera app (2026-11-16)
+
+**Import transports** (`CameraLink.swift`), all verified end to end through
+the import sheet on real shots, each download compared byte for byte:
+- adb (`adb shell ls -l /sdcard/DCIM/Camera`, `adb pull`), preferred when a
+  device is attached and authorised. About 35 s per 160 MB shot.
+- MTP via libmtp, the fallback (see the app rebuild notes).
+- Wi-Fi: HTTP to the on-camera app, found by Bonjour (`_l16studio._tcp`) or by
+  address. Tested through `adb forward tcp:8016 tcp:8016` because the Mac and
+  camera were on different networks; **not yet tested over real Wi-Fi**, and
+  Bonjour discovery is untested for the same reason.
+
+**On-camera app** (`camera-app/`, package `dev.sunkencity.l16studio`): pure
+Java, no Gradle, no dependencies; `build.sh` runs aapt2, javac, d8, zipalign
+and apksigner and produces a 48 KB APK. targetSdk 22 so storage permission is
+granted at install. Activities are landscape (the camera's 1080x1920 panel is
+used sideways). Shots live in `/sdcard/DCIM/Camera` as `L16_NNNNN.lri` plus
+an in-camera `L16_NNNNN.jpg` preview (3328x2496), which is what the gallery
+and viewer show. `TransferService` is a foreground service with a hand-written
+HTTP server on port 8016 (GET/HEAD only, Range support, shot names restricted
+to `[A-Za-z0-9_-]+` so nothing outside the camera folder is reachable).
+
+Driving the camera from the Mac, useful for testing: `adb shell input keyevent
+KEYCODE_FOCUS` then `KEYCODE_CAMERA` takes a shot in Light's camera app;
+`adb exec-out screencap -p` grabs the screen (1920x1080).
+
+**Stock services were not disabled.** `pm disable-user` from the adb shell is
+refused for system packages on this build ("Permission Denial ... package uid
+1000"). Doing it needs root for one boot. See `docs/camera-package-survey.md`
+for the candidates.
