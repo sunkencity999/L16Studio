@@ -474,3 +474,25 @@ needs root for one boot; not done.
   registered while asleep and the camera does not wake itself lying still.
   Not yet known: how it feels in the hand, false wakes when carried
   uncovered, and the standby battery cost of the batched accelerometer.
+
+### Power button: comparison with a second, working L16 (2026-11-17)
+
+Read-only probe of a second camera (LightOS 1.3.0.4, kernel
+3.18.20-perf-g6ec34d3) beside the development one (1.3.5.1,
+3.18.20-perf-g32d1d1c):
+
+- The power-key device-tree configuration is byte-identical on both:
+  `pon_1` KPDPWR, key code 116, s1 10256 ms + s2 2000 ms -> warm reset;
+  `pon_2` RESIN, no key code; `pon_3` KPDPWR+RESIN, s1 6720 ms + s2 2000 ms,
+  s2-type 7 (hard reset), with bark. So holding power ~12 s restarts the
+  camera and power + full shutter ~9 s forces it off, which matches what was
+  seen during the repair.
+- On the working camera four presses gave `qpnp_kpdpwr_status` = 8 and
+  "Going to sleep due to power button" in the log within two minutes of boot.
+- On the development camera the same counter stayed at 0 through about ten
+  presses and a reboot, then read 2 hours later: one press got through.
+
+Same software path, same configuration, one unit intermittent: the fault is
+that unit's switch or its connection, not software. The Screen off / tap to
+wake / lift to wake controls remain the workaround. Nothing was installed or
+changed on the second camera.
