@@ -106,15 +106,23 @@ function Installed {
     return $out -match "package:$([regex]::Escape($package))(\s|$)"
 }
 
+# If the user allowed the app to turn the screen off, Android won't uninstall
+# it until the app gives that permission back; the app does that when asked.
+function ReleaseScreenPermission {
+    & $adb -s $serial shell am start -n "$package/.SleepActivity" --ez deactivate true 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+}
+
 if ($Uninstall) {
     Step "Removing L16 Studio from the camera"
-    if (Installed) { & $adb -s $serial uninstall $package | Out-Null; Write-Host "Removed. Your shots are untouched." }
+    if (Installed) { ReleaseScreenPermission; & $adb -s $serial uninstall $package | Out-Null; Write-Host "Removed. Your shots are untouched." }
     else { Write-Host "L16 Studio isn't installed on this camera." }
     exit 0
 }
 
 if ($Replace -and (Installed)) {
     Step "Removing the existing copy"
+    ReleaseScreenPermission
     & $adb -s $serial uninstall $package | Out-Null
 }
 
@@ -136,5 +144,7 @@ Write-Host "  - a gallery of your shots, with a full-screen viewer"
 Write-Host "  - Edit: Auto and six looks, with sliders, saving a copy next to the shot"
 Write-Host "  - Wi-Fi transfer: serve your shots to L16Studio on a Mac, or to any browser"
 Write-Host "  - Camera: jumps to Light's own camera app, which still takes the pictures"
+Write-Host "  - Screen off: a button, and a second icon in the app list, that put the"
+Write-Host "    camera to sleep (useful if the power button is worn out)."
 Write-Host ""
 Write-Host "To remove it later: install.bat -Uninstall"

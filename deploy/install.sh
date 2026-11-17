@@ -125,9 +125,18 @@ fi
 adb_s() { "$ADB" -s "$SERIAL" "$@"; }
 installed() { adb_s shell pm list packages "$PACKAGE" 2>/dev/null | tr -d '\r' | grep -qx "package:$PACKAGE"; }
 
+# If the user allowed the app to turn the screen off ("Screen off"), Android
+# won't uninstall it until the app gives that permission back. The app does
+# that itself when asked; this is harmless if the permission was never given.
+release_screen_permission() {
+    adb_s shell am start -n "$PACKAGE/.SleepActivity" --ez deactivate true >/dev/null 2>&1 || true
+    sleep 2
+}
+
 if [ "$MODE" = "uninstall" ]; then
     step "Removing L16 Studio from the camera"
     if installed; then
+        release_screen_permission
         adb_s uninstall "$PACKAGE" >/dev/null && say "Removed. Your shots are untouched."
     else
         say "L16 Studio isn't installed on this camera."
@@ -137,6 +146,7 @@ fi
 
 if [ "$MODE" = "replace" ] && installed; then
     step "Removing the existing copy"
+    release_screen_permission
     adb_s uninstall "$PACKAGE" >/dev/null || true
 fi
 
@@ -163,5 +173,8 @@ say "  - a gallery of your shots, with a full-screen viewer"
 say "  - Edit: Auto and six looks, with sliders, saving a copy next to the shot"
 say "  - Wi-Fi transfer: serve your shots to L16Studio on a Mac, or to any browser"
 say "  - Camera: jumps to Light's own camera app, which still takes the pictures"
+say "  - Screen off: a button, and a second icon in the app list, that put the"
+say "    camera to sleep (useful if the power button is worn out). The camera"
+say "    asks you to allow it the first time."
 say ""
 say "To remove it later: run this script with --uninstall."

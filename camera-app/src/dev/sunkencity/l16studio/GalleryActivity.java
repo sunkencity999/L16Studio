@@ -123,6 +123,15 @@ public class GalleryActivity extends Activity {
         });
         bar.addView(transferButton);
 
+        TextView sleep = pill("Screen off", false);
+        sleep.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { SleepActivity.sleep(GalleryActivity.this); }
+        });
+        LinearLayout.LayoutParams sleepParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sleepParams.leftMargin = dp(10);
+        bar.addView(sleep, sleepParams);
+
         TextView camera = pill("Camera", true);
         camera.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { openCamera(); }
