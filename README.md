@@ -90,6 +90,13 @@ is an Android 6 device underneath):
 
 - **Gallery** of the shots on the camera, with a full-screen viewer (pinch or
   double-tap to zoom, swipe between shots) and delete.
+- **Editing on the camera**: Auto measures each photo (tonal range,
+  mid-tone brightness, colour cast) and corrects it; six looks build on that
+  (Auto, Vivid, Golden, Crisp, Film, Mono), with sliders for exposure,
+  contrast, highlights, shadows, colour, warmth, fade and sharpening. Hold
+  the picture to compare with the original. Saving writes a full-size copy
+  next to the shot; the original and the raw file are never changed. Edits
+  work on the camera's 8 MP preview, not on the raw data.
 - **Wi-Fi transfer**: a switch that serves the shots on the local network, so
   L16Studio on the Mac, or any browser at the address shown, can pull them
   without a cable. It is read-only, unauthenticated and only runs while

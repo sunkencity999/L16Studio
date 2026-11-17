@@ -66,6 +66,20 @@ public class ViewerActivity extends Activity {
         show(index);
     }
 
+    @Override
+    protected void onRestart() {
+        super.onRestart();
+        // Coming back from the editor: a saved edit is a new entry.
+        String current = shots.isEmpty() ? null : shots.get(index).name;
+        shots = Shots.list();
+        if (shots.isEmpty()) { finish(); return; }
+        index = 0;
+        for (int i = 0; i < shots.size(); i++) {
+            if (shots.get(i).name.equals(current)) index = i;
+        }
+        show(index);
+    }
+
     private int dp(float value) {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
     }
@@ -97,6 +111,24 @@ public class ViewerActivity extends Activity {
         text.addView(details);
         row.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
+        TextView edit = button("Edit", getColor(R.color.accent), Color.BLACK);
+        edit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Shots.Shot shot = shots.get(index);
+                if (!shot.preview.exists()) {
+                    Toast.makeText(ViewerActivity.this, "The camera hasn't written a preview for this shot yet.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                android.content.Intent intent = new android.content.Intent(ViewerActivity.this, EditActivity.class);
+                intent.putExtra(EXTRA_NAME, shot.name);
+                startActivity(intent);
+            }
+        });
+        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        editParams.rightMargin = dp(10);
+        row.addView(edit, editParams);
+
         TextView delete = button("Delete", getColor(R.color.danger), Color.WHITE);
         delete.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { confirmDelete(); }
@@ -124,7 +156,8 @@ public class ViewerActivity extends Activity {
         final Shots.Shot shot = shots.get(index);
         title.setText(shot.name + "    " + (index + 1) + " of " + shots.size());
         String when = DateFormat.format("d MMM yyyy, HH:mm", shot.modified()).toString();
-        details.setText(when + "  ·  " + (shot.raw.exists() ? "raw " + Shots.formatSize(shot.raw.length()) : "preview only"));
+        details.setText(when + "  ·  " + (shot.raw.exists() ? "raw " + Shots.formatSize(shot.raw.length())
+                : shot.isEdit() ? "edited copy" : "preview only"));
 
         if (loading != null) loading.cancel(false);
         // A quick small version first, then enough pixels for zooming.

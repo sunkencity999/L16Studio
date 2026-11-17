@@ -42,6 +42,20 @@ final class Shots {
             return (raw.exists() ? raw.length() : 0) + (preview.exists() ? preview.length() : 0);
         }
 
+        /** True for a picture saved from the editor (it has no raw file). */
+        boolean isEdit() {
+            return !raw.exists() && name.contains("_edit");
+        }
+
+        /** Short label for the gallery: "00002", or "00002 · Vivid" for an edit. */
+        String label() {
+            String base = name.startsWith("L16_") ? name.substring(4) : name;
+            int cut = base.indexOf("_edit");
+            if (cut < 0) return raw.exists() ? base : base + "  · preview only";
+            String style = base.substring(cut + 5).replace("_", " ").trim();
+            return base.substring(0, cut) + (style.isEmpty() ? "  · edited" : "  · " + style);
+        }
+
         /** Deletes both files. Returns true if nothing of the shot is left. */
         boolean delete() {
             boolean ok = true;
@@ -123,6 +137,11 @@ final class Shots {
 
     /** Decodes `file` so its width is at least `targetWidth`, using power-of-two subsampling. */
     static Bitmap decode(File file, int targetWidth) {
+        return decode(file, targetWidth, Bitmap.Config.RGB_565);
+    }
+
+    /** As above, with an explicit pixel format (editing needs ARGB_8888). */
+    static Bitmap decode(File file, int targetWidth, Bitmap.Config config) {
         if (!file.exists()) return null;
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
@@ -132,7 +151,7 @@ final class Shots {
         while (bounds.outWidth / (sample * 2) >= targetWidth) sample *= 2;
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inSampleSize = sample;
-        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+        opts.inPreferredConfig = config;
         try {
             return BitmapFactory.decodeFile(file.getPath(), opts);
         } catch (OutOfMemoryError e) {

@@ -262,7 +262,7 @@ public class GalleryActivity extends Activity {
             final Tile tile = convertView instanceof Tile ? (Tile) convertView : new Tile(GalleryActivity.this);
             final Shots.Shot shot = shots.get(position);
             tile.bound = shot.name;
-            tile.label.setText(shot.name.replace("L16_", "") + (shot.raw.exists() ? "" : "  · preview only"));
+            tile.label.setText(shot.label());
 
             Bitmap cached = Shots.cachedThumb(shot);
             tile.image.setImageBitmap(cached);

@@ -293,3 +293,30 @@ KEYCODE_FOCUS` then `KEYCODE_CAMERA` takes a shot in Light's camera app;
 refused for system packages on this build ("Permission Denial ... package uid
 1000"). Doing it needs root for one boot. See `docs/camera-package-survey.md`
 for the candidates.
+
+## On-camera editor (2026-11-16)
+
+`camera-app` gained `EditActivity` and `Look`. Reached from the viewer's Edit
+button.
+
+- `Look.analyse` measures a 320 px copy: black/white points at the 0.4 and
+  99.6 percentiles (capped so a deliberately dark or light picture isn't
+  forced to full range), a gamma that moves the median 60% of the way to
+  0.46, and a colour-cast correction from near-neutral mid-tone pixels only,
+  limited to +/-12% per channel and skipped if under 5% of pixels qualify.
+- `Look.forStyle` layers a preset on those measurements; every style except
+  Original starts from the Auto correction.
+- `Look.render` is three RenderScript intrinsic passes: a per-channel LUT
+  (levels, gain, gamma, shadow/highlight bumps, contrast S-curve, split
+  toning, fade), a luma-preserving saturation matrix, and a 3x3 sharpen.
+  Framework RenderScript only, so no build step beyond javac.
+- The preview is 1600 px wide; saving re-renders the full 3328x2496 preview
+  JPEG and writes `L16_NNNNN_edit_<Style>.jpg` (then `_2`, ...) at quality 95.
+  The gallery lists it as its own entry labelled with the style.
+
+Checked on the camera: every style renders, the sliders update live, and a
+saved Vivid copy was pulled back and confirmed full size. Not checked: how it
+compares with the stock gallery's own editing (I have not looked at what that
+offers), behaviour on very dark or very bright photos, and hold-to-compare.
+Limits: tone shaping is a global curve (no local shadow recovery), and it
+edits the camera's 8-bit preview, not the raw file.
