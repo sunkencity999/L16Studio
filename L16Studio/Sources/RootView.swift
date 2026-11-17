@@ -86,6 +86,12 @@ struct SidebarView: View {
                     Label("Import from L16…", systemImage: "cable.connector")
                 }
                 .buttonStyle(.plain)
+                Button { model.takePicture() } label: {
+                    Label(model.isCapturing ? "Taking a picture…" : "Take a Picture", systemImage: "camera.shutter.button")
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isCapturing)
+                .help("Fire a camera connected by cable and open the shot here (needs USB debugging on the camera)")
                 AutoSyncRow(sync: model.autoSync)
             }
         }

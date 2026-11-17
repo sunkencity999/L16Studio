@@ -555,3 +555,16 @@ the half charge Light asks for.
 - Left as found after the test: the camera's Wi-Fi transfer off, the Mac's
   switch off. The test shot (L16_00032) is still on the second camera and
   in the Mac library.
+
+### Taking a picture from the Mac (2026-11-17)
+
+`CameraLink.capture()` wakes the camera over adb, refuses if the lock screen
+is showing, brings Light's camera app forward, sends KEYCODE_CAMERA and waits
+for a new `.lri` whose size has stopped changing. Checked once on the second
+camera from the app's File menu: L16_00033 was taken, pulled at full size
+(about 35 s at roughly 4.5 MB/s) and added to the library index. Not
+confirmed by eye: that the viewer then opened on it (the Mac's display was
+not capturable at the time). It cannot work over Wi-Fi: an ordinary app on
+the camera is not allowed to press keys. Two test shots (L16_00032 and
+L16_00033) are on the second camera and in the Mac library as a result of
+this and the auto-import test.

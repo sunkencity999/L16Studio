@@ -121,6 +121,40 @@ enum CameraLink {
         }
     }
 
+    /// Takes a picture on a camera connected by cable and returns the new
+    /// raw file once the camera has finished writing it. Needs adb (USB
+    /// debugging), because it works by pressing the camera's shutter key.
+    static func capture() async throws -> RemoteFile {
+        guard let adb = tool("adb") else { throw Failure.toolsMissing }
+        guard await adbReady() else {
+            throw Failure.failed("Taking a picture from the Mac needs the cable, with USB debugging switched on in the camera's developer settings.")
+        }
+        let before = Set(try await listOverADB().map(\.name))
+
+        _ = try await run(adb, ["shell", "input", "keyevent", "KEYCODE_WAKEUP"], timeout: 10)
+        let windows = try await run(adb, ["shell", "dumpsys", "window"], timeout: 15)
+        if windows.contains("mShowingLockscreen=true") {
+            throw Failure.failed("The camera is locked. Unlock its screen, then try again.")
+        }
+        // Bring Light's camera app forward if it isn't already.
+        let focus = windows.split(whereSeparator: \.isNewline).first { $0.contains("mCurrentFocus") } ?? ""
+        if !focus.contains("light.co.lightcamera") {
+            _ = try await run(adb, ["shell", "monkey", "-p", "light.co.lightcamera", "-c", "android.intent.category.LAUNCHER", "1"], timeout: 15)
+            try await Task.sleep(for: .seconds(3))
+        }
+        _ = try await run(adb, ["shell", "input", "keyevent", "KEYCODE_CAMERA"], timeout: 10)
+
+        // The file appears at once and grows; it is done when its size holds.
+        var last: RemoteFile?
+        for _ in 0..<25 {
+            try await Task.sleep(for: .seconds(1))
+            guard let fresh = try await listOverADB().last(where: { !before.contains($0.name) }) else { continue }
+            if let last, last.name == fresh.name, last.size == fresh.size, fresh.size > 1_000_000 { return fresh }
+            last = fresh
+        }
+        throw Failure.failed("The camera didn't produce a new shot. Check that its camera app is showing and nothing is covering the screen.")
+    }
+
     private static func baseURL(_ address: String) -> URL? {
         var text = address.trimmingCharacters(in: .whitespaces)
         if let scheme = text.range(of: "://") { text = String(text[scheme.upperBound...]) }

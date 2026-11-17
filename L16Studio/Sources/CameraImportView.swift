@@ -134,26 +134,6 @@ struct CameraImportView: View {
         return size == file.size
     }
 
-    /// Every L16 numbers its shots from 1. A file of the same name but a
-    /// different size already in the library folder is another camera's
-    /// shot (or another shot after a counter reset), so the new one goes in
-    /// a folder beside it instead of replacing it.
-    private func folder(for file: CameraLink.RemoteFile) -> URL {
-        let main = LibraryStore.libraryFolder
-        let path = localURL(file).path
-        guard FileManager.default.fileExists(atPath: path) else { return main }
-        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
-        if size == file.size { return main }
-        var n = 2
-        while true {
-            let other = main.appendingPathComponent("Camera \(n)", isDirectory: true)
-            let taken = other.appendingPathComponent(file.name).path
-            let takenSize = (try? FileManager.default.attributesOfItem(atPath: taken)[.size] as? NSNumber)?.int64Value
-            if takenSize == nil || takenSize == file.size { return other }
-            n += 1
-        }
-    }
-
     private func refresh() async {
         isLoading = true
         problem = nil
@@ -180,7 +160,7 @@ struct CameraImportView: View {
         for (i, file) in queue.enumerated() {
             progress = "Downloading \(file.name) (\(i + 1) of \(queue.count))"
             do {
-                let url = try await CameraLink.download(file, into: folder(for: file))
+                let url = try await CameraLink.download(file, into: LibraryStore.folder(forIncoming: file.name, size: file.size))
                 await model.library.importFiles([url])
                 chosen.remove(file.id)
             } catch {

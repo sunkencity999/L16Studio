@@ -70,6 +70,26 @@ final class LibraryStore {
         return pictures.appendingPathComponent("L16 Studio", isDirectory: true)
     }()
 
+    /// Where a shot arriving from a camera should be saved. Every L16
+    /// numbers its shots from 1, so a file of the same name but a different
+    /// size already in the library folder is another camera's shot (or
+    /// another shot after a counter reset); the new one then goes in a
+    /// folder beside it instead of replacing it.
+    static func folder(forIncoming name: String, size: Int64) -> URL {
+        func sizeOf(_ url: URL) -> Int64? {
+            (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+        }
+        let main = libraryFolder
+        guard let existing = sizeOf(main.appendingPathComponent(name)), existing != size else { return main }
+        var n = 2
+        while true {
+            let other = main.appendingPathComponent("Camera \(n)", isDirectory: true)
+            let taken = sizeOf(other.appendingPathComponent(name))
+            if taken == nil || taken == size { return other }
+            n += 1
+        }
+    }
+
     private static var indexURL: URL { supportFolder.appendingPathComponent("library.json") }
 
     init() {

@@ -42,6 +42,11 @@ below) but not a port of any existing project's source.
   camera is seen, the shots already on it are left alone (use Import for
   those); after that anything new is fetched, including shots taken while
   the camera was away.
+- **Take a picture from the Mac**: with the camera on a cable (USB debugging
+  on), "Take a Picture" in the sidebar or File menu (Cmd-T) fires the
+  shutter, waits for the camera to finish writing the shot, brings it into
+  the library and opens it. The transfer runs at USB 2 speed, so a shot
+  takes about half a minute to arrive.
 - **Real capture details**: the library is ordered by when each shot was
   taken, read from the camera's own record in the raw file, and exports
   carry it as standard metadata (date and time zone, exposure, sensitivity,

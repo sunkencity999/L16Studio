@@ -35,6 +35,29 @@ final class AppModel {
         self.session = nil
     }
 
+    private(set) var isCapturing = false
+
+    /// Fires the camera over the cable, then brings the shot in and opens it.
+    func takePicture() {
+        guard !isCapturing else { return }
+        isCapturing = true
+        library.importStatus = "Taking a picture…"
+        Task {
+            defer { isCapturing = false }
+            do {
+                let file = try await CameraLink.capture()
+                library.importStatus = "Receiving \(file.name)"
+                let folder = LibraryStore.folder(forIncoming: file.name, size: file.size)
+                let url = try await CameraLink.download(file, into: folder)
+                let added = await library.importFiles([url])
+                if let shot = added.first ?? library.shots.first(where: { $0.path == url.path }) { open(shot) }
+            } catch {
+                library.importStatus = nil
+                library.lastError = error.localizedDescription
+            }
+        }
+    }
+
     func importFromDisk() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [L16FileType.lri, .folder]
@@ -111,6 +134,9 @@ struct L16StudioApp: App {
                     .keyboardShortcut("i", modifiers: .command)
                 Button("Import from Camera…") { model.showCameraImport = true }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("Take a Picture") { model.takePicture() }
+                    .keyboardShortcut("t", modifiers: .command)
+                    .disabled(model.isCapturing)
             }
             CommandMenu("Shot") {
                 Button("Back to Library") { model.closeViewer() }
