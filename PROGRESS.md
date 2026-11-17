@@ -429,7 +429,7 @@ needs root for one boot; not done.
   `dumpsys power` reports `mDoubleTapWakeEnabled=false`. So Screen off now
   starts with `NapActivity`: black, `screenBrightness = 0` (clamped by the
   system to its minimum, 10/255), `FLAG_KEEP_SCREEN_ON`, any touch or key
-  finishes it. After `DEFAULT_SECONDS` (120) it calls `SleepActivity.sleepNow`
+  finishes it. After `DEFAULT_SECONDS` (600; the owner chose ten minutes, valuing instant readiness over battery) it calls `SleepActivity.sleepNow`
   for real sleep. `--ei nap_seconds N` on the SleepActivity intent shortens it
   for testing. Verified over adb: nap at brightness 10, a tap returns to the
   previous screen with brightness restored, a 6 s timer ends in

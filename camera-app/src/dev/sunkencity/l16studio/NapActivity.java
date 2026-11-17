@@ -19,15 +19,19 @@ import android.widget.TextView;
  *
  * The L16's touch panel is powered down when the screen is really off and
  * has no wake gesture, so a tap can only wake the camera while the display
- * is still technically on. This keeps it that way for a short while, looking
- * off, and then hands over to real sleep, where lift to wake takes over. The
- * nap is kept short because a dark-but-on screen still uses far more battery
- * than sleep.
+ * is still technically on. This keeps it that way for a while, looking off,
+ * and then hands over to real sleep, where lift to wake takes over. A
+ * dark-but-on screen uses more battery than sleep, so the nap does end.
  */
 public class NapActivity extends Activity {
     static final String EXTRA_SECONDS = "nap_seconds";
-    /** How long a tap can still wake the camera before it really sleeps. */
-    static final int DEFAULT_SECONDS = 120;
+    /**
+     * How long a tap can still wake the camera before it really sleeps. Ten
+     * minutes: this is a camera, not a phone. It is picked up to catch a
+     * moment, so being instantly ready matters more than the battery a
+     * blacked-out screen uses.
+     */
+    static final int DEFAULT_SECONDS = 600;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean sleeping;
