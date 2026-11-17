@@ -36,6 +36,11 @@ below) but not a port of any existing project's source.
   image, and are the same looks as the on-camera editor.
 - **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
   as JPEG, HEIC or 16-bit TIFF.
+- **Real capture details**: the library is ordered by when each shot was
+  taken, read from the camera's own record in the raw file, and exports
+  carry it as standard metadata (date and time zone, exposure, sensitivity,
+  focal length, lens, and the location when the camera had one), so they
+  sort and search properly in Photos, Lightroom and the like.
 
 **Not yet**: depth effects (refocusing, background blur), and reliable
 telephoto detail at close range. Nobody in the L16 community has reproduced
@@ -111,6 +116,13 @@ is an Android 6 device underneath):
   without a cable. It is read-only, unauthenticated and only runs while
   switched on, so use it on a network you trust.
 - A button to jump to Light's own camera app, which still does the shooting.
+- **An optional home screen** built for a camera: one large Camera tile, then
+  Gallery (showing the latest shot), Transfer, Screen off and All apps, with
+  the date, battery and free space along the top. All apps lists everything
+  installed (Firefox, Settings and the rest); hold an icon for its system
+  page. Nothing is replaced: the first time you press Home, Android asks
+  whether to use "L16 Studio Home" or the stock one, and the "Home screen…"
+  button in All apps opens the setting that switches between them.
 - **Screen off and lift to wake**, for cameras whose power button no longer
   works. A button in the gallery, and a second icon in the app list, put the
   camera to sleep (long-press the button to skip straight to real sleep).

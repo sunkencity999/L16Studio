@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.sunkencity.l16studio"
-    android:versionCode="4"
-    android:versionName="0.2.2">
+    android:versionCode="5"
+    android:versionName="0.3.0">
 
     <!-- Target 22 so storage access is granted at install time: this app is
          only meant for the Light L16 (Android 6.0.1), and it must work the
@@ -34,6 +34,31 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- An optional home screen. Android offers it next to the stock
+             one the first time Home is pressed; nothing is replaced. -->
+        <activity
+            android:name=".HomeActivity"
+            android:label="L16 Studio Home"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="dev.sunkencity.l16studio.home"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".AppsActivity"
+            android:excludeFromRecents="true"
+            android:taskAffinity="dev.sunkencity.l16studio.home"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <activity
             android:name=".ViewerActivity"

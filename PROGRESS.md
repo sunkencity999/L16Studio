@@ -510,3 +510,24 @@ the first use of the package on a camera other than the development one.
 The Mac's USB port did not charge that camera while it was awake and
 transferring (42% for over half an hour); it needed a wall charger to reach
 the half charge Light asks for.
+
+### Capture details and a home screen (2026-11-17)
+
+- The raw file's `image_time_stamp` is local wall-clock time and `tz_offset`
+  is minutes from UTC (-480 on shots taken in California in November; the
+  times match the files' own dates). The library now sorts by it, and index
+  entries written before this are refreshed once on launch (`hasCameraTime`).
+- GPS fields are present but NaN when the camera had no fix; none of the
+  shots so far has a location, so the GPS export path is covered only by a
+  unit test with made-up coordinates.
+- Exports carry EXIF/TIFF details (date with offset, exposure, sensitivity,
+  35mm focal length, lens, make and model); DNGs carry DateTime and
+  Software. `MetadataTests` exports a real shot as JPEG, HEIC and DNG and
+  reads the values back. The fused export path uses the same dictionary but
+  was not exercised by a test.
+- Camera app 0.3.0 adds `HomeActivity` (HOME category) and `AppsActivity`.
+  Checked on the second camera by starting the activity directly, without
+  making it the default: each tile opens the right screen, Firefox launches
+  from All apps, Back on the home screen does nothing. Not yet checked:
+  choosing it in Android's home-screen prompt and living with it across a
+  restart.

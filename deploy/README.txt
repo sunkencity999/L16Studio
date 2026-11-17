@@ -8,6 +8,10 @@ This package puts the L16 Studio app on a Light L16. The app adds:
     sliders, saving a copy next to the shot
   - Wi-Fi transfer of shots to L16Studio on a Mac, or to any web browser
   - a button to Light's own camera app, which still takes the pictures
+  - an optional home screen with large Camera, Gallery, Transfer, Screen
+    off and All apps tiles. The camera asks which home screen to use the
+    first time you press Home; the stock one stays installed, and the
+    "Home screen..." button under All apps switches between them.
   - "Screen off" and lift to wake, for cameras whose power button has worn
     out: a button, and a second icon in the app list, put the camera to
     sleep. A tap wakes it during the first ten minutes; after that, picking
