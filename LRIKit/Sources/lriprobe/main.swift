@@ -87,6 +87,7 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
         print("awb gains: \(file.metadata.awbGain.map { "r=\($0.r) gr=\($0.gr) gb=\($0.gb) b=\($0.b)" } ?? "?")")
         print("orientation: \(file.metadata.orientation.map(String.init(describing:)) ?? "?")")
         print("image gain: \(file.metadata.imageGain.map { String($0) } ?? "?")  integration: \(file.metadata.imageIntegrationTime.map { String($0) } ?? "?") s")
+        print("capture time: \(file.metadata.captureTime.map { "\($0)" } ?? "?")  model: \(file.metadata.deviceModel ?? "?")  flash: \(file.metadata.flashFired.map(String.init) ?? "?")  altitude: \(file.metadata.altitude.map { String($0) } ?? "?")")
         print("on tripod: \(file.metadata.onTripod.map(String.init) ?? "?")")
         let lat = file.metadata.latitude
         let lon = file.metadata.longitude

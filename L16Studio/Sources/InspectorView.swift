@@ -91,7 +91,7 @@ struct ShotInfoSection: View {
             InfoRow(label: "Sensitivity", value: Describe.iso(shot.gain))
             InfoRow(label: "Lenses fired", value: "\(shot.lenses.count)")
             InfoRow(label: "File", value: Describe.size(shot.fileSize))
-            InfoRow(label: "Added", value: Describe.date(shot.capturedAt))
+            InfoRow(label: shot.hasCameraTime == true ? "Taken" : "File date", value: Describe.date(shot.capturedAt))
         }
     }
 }

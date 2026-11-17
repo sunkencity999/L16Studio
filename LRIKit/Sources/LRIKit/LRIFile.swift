@@ -19,6 +19,24 @@ public struct ShotMetadata: Sendable {
     public var sensorData: [SensorData] = []
     public var latitude: Double?
     public var longitude: Double?
+    /// Metres above sea level.
+    public var altitude: Double?
+    /// Compass direction the camera was pointing, in degrees.
+    public var heading: Double?
+    public var headingIsTrueNorth = false
+    /// When the shot was taken, as the camera's clock read (wall-clock
+    /// fields, no zone applied).
+    public var captureTime: CaptureTime?
+    public var deviceModel: String?
+    public var flashFired: Bool?
+}
+
+/// The camera's own record of when a shot was taken: local wall-clock time
+/// plus, when the camera knew it, the zone's offset from UTC.
+public struct CaptureTime: Sendable, Hashable {
+    public var year, month, day, hour, minute, second: Int
+    /// As stored in the file (`tz_offset`); see `utcOffsetSeconds`.
+    public var rawZoneOffset: Int?
 }
 
 public struct LRIFile: Sendable {
@@ -74,8 +92,7 @@ public struct LRIFile: Sendable {
             // GPSData blocks are rare in practice; not required for a first
             // decode, so we don't fail the whole file if this one is malformed.
             if let gps = try? Ltpb_GPSData(serializedBytes: block.message) {
-                if gps.hasLatitude { metadata.latitude = gps.latitude }
-                if gps.hasLongitude { metadata.longitude = gps.longitude }
+                apply(gps, to: &metadata)
             }
             return
 
@@ -182,6 +199,22 @@ public struct LRIFile: Sendable {
         if header.hasImageFocalLength {
             metadata.focalLength = header.imageFocalLength
         }
+        if header.hasImageTimeStamp {
+            let t = header.imageTimeStamp
+            metadata.captureTime = CaptureTime(
+                year: Int(t.year), month: Int(t.month), day: Int(t.day),
+                hour: Int(t.hour), minute: Int(t.minute), second: Int(t.second),
+                rawZoneOffset: t.hasTzOffset ? Int(t.tzOffset) : nil)
+        }
+        if header.hasDeviceModelName {
+            metadata.deviceModel = header.deviceModelName
+        }
+        if header.hasFlashData, header.flashData.hasMode {
+            metadata.flashFired = header.flashData.mode == .flash
+        }
+        if header.hasGpsData {
+            apply(header.gpsData, to: &metadata)
+        }
         for sd in header.sensorData {
             metadata.sensorData.append(SensorData(
                 sensorType: SensorModel(sd.type),
@@ -234,6 +267,17 @@ public struct LRIFile: Sendable {
         let jpeg2 = try take(len2)
         let jpeg3 = try take(len3)
         return .bayerJpeg(header: header, format: format, jpeg0: jpeg0, jpeg1: jpeg1, jpeg2: jpeg2, jpeg3: jpeg3)
+    }
+
+    private static func apply(_ gps: Ltpb_GPSData, to metadata: inout ShotMetadata) {
+        // With no fix the camera still writes the fields, as NaN.
+        if gps.hasLatitude, gps.latitude.isFinite { metadata.latitude = gps.latitude }
+        if gps.hasLongitude, gps.longitude.isFinite { metadata.longitude = gps.longitude }
+        if gps.hasAltitude, gps.altitude.value.isFinite { metadata.altitude = gps.altitude.value }
+        if gps.hasHeading, gps.heading.value.isFinite {
+            metadata.heading = gps.heading.value
+            metadata.headingIsTrueNorth = gps.heading.ref.rawValue == 1
+        }
     }
 
     private static func apply(_ vp: Ltpb_ViewPreferences, to metadata: inout ShotMetadata) {

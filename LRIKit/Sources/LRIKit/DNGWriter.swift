@@ -59,7 +59,8 @@ public enum DNGWriter {
         blackLevel: Float? = nil,
         orientation: Orientation = .normal,
         neutral: (r: Float, g: Float, b: Float)? = nil,
-        baselineExposure: Float = 0
+        baselineExposure: Float = 0,
+        captureTime: CaptureTime? = nil
     ) throws -> Data {
         let cfa = image.cfaPattern
         guard cfa != nil || image.sensor == .ar1335Mono else {
@@ -100,6 +101,10 @@ public enum DNGWriter {
         tiff.add(tag: 279, long: UInt32(pixelData.count)) // StripByteCounts
         tiff.add(tag: 274, short: orientation.rawValue) // Orientation
         tiff.add(tag: 284, short: 1) // PlanarConfiguration
+        tiff.add(tag: 305, ascii: "L16 Studio") // Software
+        if let captureTime {
+            tiff.add(tag: 306, ascii: captureTime.exifString) // DateTime
+        }
 
         if let cfa {
             tiff.add(tag: 33421, shorts: [2, 2]) // CFARepeatPatternDim

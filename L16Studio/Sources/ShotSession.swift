@@ -381,13 +381,16 @@ final class ShotSession {
             } else {
                 merged = try WideFusion.fuse(file: file, adjustments: development).image
             }
-            try Self.write(Self.finished(merged, look: look), as: format, to: destination)
+            // Either merge covers the wide lenses' field of view.
+            let details = file.metadata.imageProperties(focalLength35: 28)
+            try Self.write(Self.finished(merged, look: look), as: format, to: destination, details: details)
         }.value
     }
 
-    private nonisolated static func write(_ float: CGImage, as format: ExportFormat, to url: URL) throws {
+    private nonisolated static func write(_ float: CGImage, as format: ExportFormat, to url: URL, details: [CFString: Any]) throws {
         var image = float
-        var properties: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.95]
+        var properties = details
+        properties[kCGImageDestinationLossyCompressionQuality] = 0.95
         if format == .tiff {
             // 16-bit Display P3: far more widely readable than a float TIFF.
             guard let space = CGColorSpace(name: CGColorSpace.displayP3),
@@ -398,7 +401,10 @@ final class ShotSession {
             context.draw(float, in: CGRect(x: 0, y: 0, width: float.width, height: float.height))
             guard let converted = context.makeImage() else { throw ImageRendererError.renderFailed }
             image = converted
-            properties = [kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFCompression: 5]]
+            properties[kCGImageDestinationLossyCompressionQuality] = nil
+            var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+            tiff[kCGImagePropertyTIFFCompression] = 5
+            properties[kCGImagePropertyTIFFDictionary] = tiff
         }
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, format.type.identifier as CFString, 1, nil) else {
             throw ImageRendererError.destinationCreationFailed

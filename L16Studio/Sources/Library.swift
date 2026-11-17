@@ -9,6 +9,11 @@ struct Shot: Codable, Identifiable, Hashable {
     var path: String
     var addedAt = Date()
     var capturedAt: Date
+    /// True once `capturedAt` has been read from the camera's own record in
+    /// the file. Shots indexed by earlier versions carry the file's date
+    /// instead and are refreshed on launch.
+    var hasCameraTime: Bool?
+    var hasLocation: Bool?
     var fileSize: Int64
     var focalLength: Int?
     var gain: Float?
@@ -67,7 +72,28 @@ final class LibraryStore {
 
     private static var indexURL: URL { supportFolder.appendingPathComponent("library.json") }
 
-    init() { load() }
+    init() {
+        load()
+        refreshCaptureTimes()
+    }
+
+    /// Re-reads the capture time for shots indexed before the app read it
+    /// from the file. Runs once per shot, in the background.
+    private func refreshCaptureTimes() {
+        let stale = shots.filter { $0.hasCameraTime == nil && $0.exists }
+        guard !stale.isEmpty else { return }
+        Task { [weak self] in
+            for shot in stale {
+                let url = shot.url
+                guard let fresh = try? await Task.detached(priority: .utility, operation: { try Self.describe(url) }).value else { continue }
+                self?.update(shot.id) {
+                    $0.capturedAt = fresh.capturedAt
+                    $0.hasCameraTime = fresh.hasCameraTime
+                    $0.hasLocation = fresh.hasLocation
+                }
+            }
+        }
+    }
 
     var visibleShots: [Shot] {
         let filtered: [Shot]
@@ -162,9 +188,12 @@ final class LibraryStore {
         let file = try LRIFile.decode(data)
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         let created = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date) ?? Date()
+        let taken = file.metadata.captureTime?.date
         return Shot(
             path: url.path,
-            capturedAt: created,
+            capturedAt: taken ?? created,
+            hasCameraTime: taken != nil,
+            hasLocation: file.metadata.latitude != nil && file.metadata.longitude != nil,
             fileSize: (attrs[.size] as? NSNumber)?.int64Value ?? Int64(data.count),
             focalLength: file.metadata.focalLength.map(Int.init),
             gain: file.metadata.imageGain,

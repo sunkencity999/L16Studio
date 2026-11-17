@@ -49,6 +49,8 @@ public struct RenderAdjustments: Sendable, Hashable, Codable {
 public final class LensRenderer: @unchecked Sendable {
     public let image: RawImage
     public let orientation: Orientation
+    /// The shot's capture details, written into exported files.
+    public let metadata: ShotMetadata
 
     /// As-shot white balance as Core Image derived it from the DNG
     /// (colour modules only).
@@ -73,6 +75,7 @@ public final class LensRenderer: @unchecked Sendable {
     public init(image: RawImage, file: LRIFile) throws {
         self.image = image
         self.orientation = file.metadata.orientation ?? .normal
+        self.metadata = file.metadata
         guard let samples = try image.unpackedSamples() else {
             // BayerJPEG captures: plane ordering is still unconfirmed (see BayerJPEG.swift).
             throw ImageRendererError.unpackingUnavailable
@@ -206,7 +209,10 @@ public final class LensRenderer: @unchecked Sendable {
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else {
             throw ImageRendererError.destinationCreationFailed
         }
-        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        var properties = metadata.imageProperties(
+            focalLength35: image.camera.focalLength, lens: image.camera, exposure: image.exposure)
+        properties[kCGImageDestinationLossyCompressionQuality] = quality
+        CGImageDestinationAddImage(dest, cg, properties as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { throw ImageRendererError.destinationCreationFailed }
     }
 }
