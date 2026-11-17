@@ -496,3 +496,17 @@ Same software path, same configuration, one unit intermittent: the fault is
 that unit's switch or its connection, not software. The Screen off / tap to
 wake / lift to wake controls remain the workaround. Nothing was installed or
 changed on the second camera.
+
+### Second camera updated and set up (2026-11-17)
+
+The second L16 went from LightOS 1.3.0.4 to 1.3.5.1 by Light's own route:
+the update zip copied to the root of internal storage (`adb push`, md5
+checked on the camera), then a restart and the on-camera update prompt. Its
+60 files were backed up and size-verified first; an interrupted `adb pull` of
+the folder was resumed file by file. Afterwards: build `00WW_1_351`, verified
+boot still green, all shots present, the zip consumed. The released
+`L16Studio-camera-0.2.2.zip` installer then installed the app in one run:
+the first use of the package on a camera other than the development one.
+The Mac's USB port did not charge that camera while it was awake and
+transferring (42% for over half an hour); it needed a wall charger to reach
+the half charge Light asks for.
