@@ -196,6 +196,29 @@ public final class LensRenderer: @unchecked Sendable {
         let boost = filter.boostAmount
         if sceneLinear { filter.boostAmount = 0 }
         defer { filter.boostAmount = boost }
+        var planes = try renderPlanesLocked()
+
+        // Highlight recovery. The camera exposes its reference module a stop
+        // under the others, and that stop is brought back up in development,
+        // which pushes the module's brightest real detail past white, where
+        // it is clipped. Develop it once more without the lift and use that
+        // darker copy wherever the normal one has blown out.
+        let headroom = highlightHeadroomEV
+        if headroom > 0.4, ProcessInfo.processInfo.environment["L16_NO_HIGHLIGHTS"] == nil {
+            filter.exposure = adjustments.exposure - headroom
+            let dark = try renderPlanesLocked()
+            filter.exposure = adjustments.exposure
+            Self.recoverHighlights(in: &planes, from: dark, lift: powf(2, headroom), keepRange: sceneLinear)
+        }
+        return planes
+    }
+
+    /// Stops of real highlight detail this module holds above the shot's
+    /// nominal white.
+    var highlightHeadroomEV: Float { isMonochrome ? 0 : max(0, baselineEV) }
+
+    /// Call with `lock` held.
+    private func renderPlanesLocked() throws -> RGBPlanes {
         guard let output = filter.outputImage else { throw ImageRendererError.rawFilterProducedNoOutput }
         let extent = output.extent.integral
         let width = Int(extent.width), height = Int(extent.height)
@@ -209,6 +232,69 @@ public final class LensRenderer: @unchecked Sendable {
                 bounds: extent, format: .RGBAf, colorSpace: space)
         }
         return RGBPlanes(width: width, height: height, rgba: rgba)
+    }
+
+    /// Where `normal` approaches white, replaces it with `dark` (the same
+    /// frame developed `lift` times darker) brought back up.
+    ///
+    /// With `keepRange` the recovered values are left above 1.0 (for a raw
+    /// file, whose reader decides what to do with them). Otherwise they are
+    /// folded into the range below white with a soft shoulder, so bright
+    /// areas keep their detail and colour instead of going flat.
+    static func recoverHighlights(in normal: inout RGBPlanes, from dark: RGBPlanes, lift: Float, keepRange: Bool) {
+        let count = normal.width * normal.height
+        guard dark.width == normal.width, dark.height == normal.height, count > 0 else { return }
+        let knee: Float = 0.72          // below this the normal frame is used as it is
+        let span: Float = 1 - knee
+        let width = normal.width, height = normal.height
+
+        normal.r.data.withUnsafeMutableBufferPointer { nr in
+        normal.g.data.withUnsafeMutableBufferPointer { ng in
+        normal.b.data.withUnsafeMutableBufferPointer { nb in
+        dark.r.data.withUnsafeBufferPointer { dr in
+        dark.g.data.withUnsafeBufferPointer { dg in
+        dark.b.data.withUnsafeBufferPointer { db in
+            // The tone curve makes "developed darker" differ from "divided
+            // by lift", so measure the actual ratio just below the knee,
+            // where both copies are sound.
+            var sumND = 0.0, sumDD = 0.0
+            var i = 0
+            while i < count {
+                let top = max(nr[i], ng[i], nb[i])
+                if top > 0.40, top < 0.66 {
+                    let n = Double(nr[i] + ng[i] + nb[i]), d = Double(dr[i] + dg[i] + db[i])
+                    sumND += n * d; sumDD += d * d
+                }
+                i += 97
+            }
+            let measured = sumDD > 0 ? Float(sumND / sumDD) : lift
+            let scale = min(lift * 1.6, max(lift * 0.6, measured))
+
+            parallelRows(height) { rows in
+                for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
+                    let top = max(nr[i], ng[i], nb[i])
+                    guard top > knee else { continue }
+                    // 0 at the knee, 1 by the time the normal frame clips.
+                    var t = min(1, (top - knee) / (0.94 - knee))
+                    t = t * t * (3 - 2 * t)
+                    var r = dr[i] * scale, g = dg[i] * scale, b = db[i] * scale
+                    if !keepRange {
+                        // Shoulder on the brightest channel; the others
+                        // follow in proportion, which keeps the colour.
+                        let peak = max(r, g, b)
+                        if peak > knee {
+                            let over = peak - knee
+                            let folded = knee + span * over / (over + span)
+                            let k = folded / peak
+                            r *= k; g *= k; b *= k
+                        }
+                    }
+                    nr[i] += (r - nr[i]) * t
+                    ng[i] += (g - ng[i]) * t
+                    nb[i] += (b - nb[i]) * t
+                }
+            }
+        }}}}}}
     }
 
     /// Writes a rendered image to disk as JPEG or HEIC (`quality` 0...1).

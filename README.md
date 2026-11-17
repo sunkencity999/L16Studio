@@ -49,6 +49,11 @@ below) but not a port of any existing project's source.
   shutter, waits for the camera to finish writing the shot, brings it into
   the library and opens it. The transfer runs at USB 2 speed, so a shot
   takes about half a minute to arrive.
+- **Highlight recovery in the merge**: the camera exposes its main lens a
+  stop under the others, so that lens holds detail in bright areas the
+  others have lost. The merge now uses it: skies, windows and lamps that
+  used to go flat white keep their texture, rolled off smoothly. The merged
+  DNG keeps the whole extra stop for you to place in a raw converter.
 - **Real capture details**: the library is ordered by when each shot was
   taken, read from the camera's own record in the raw file, and exports
   carry it as standard metadata (date and time zone, exposure, sensitivity,

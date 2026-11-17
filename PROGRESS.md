@@ -585,3 +585,23 @@ this and the auto-import test.
   (uncompressed). The full merge peaks at about 10 GB of memory, most of it
   the merge itself.
 - `lriprobe --fuse-dng`, and `--fuse-tele --dng`.
+
+### Highlight recovery (2026-11-17)
+
+- Every shot looked at has the reference module (A1) at half the analog
+  gain of the rest. Development lifts it a stop to match, and CIRAWFilter
+  then clips what goes past white: merged values topped out at 1.0-1.3.
+- `renderLinear` now develops such a module a second time without the lift
+  and blends that in above 0.72 linear. For display it is folded under
+  white with a shoulder applied to the brightest channel (the others follow
+  in proportion); with `sceneLinear` it is left above 1.0. The ratio between
+  the two developments is measured just below the knee, because the tone
+  curve makes it differ from the nominal 2x.
+- Shot 2 (office ceiling): tile lines and light fixtures that were flat
+  white are back, smooth gradient, no fringing at 1:1. Merged DNG values now
+  reach 2.0, with 4.4% of pixels above 1.0. The other lenses are clipped in
+  those areas and are rejected there by the existing agreement test.
+- Side effect: unclipped near-whites between 0.72 and 1.0 come out a little
+  darker than before (the shoulder starts there).
+- Only the merge has this. A single lens shown or exported on its own still
+  clips. `L16_NO_HIGHLIGHTS=1` switches it off for comparison.
