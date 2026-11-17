@@ -24,6 +24,8 @@ final class ShotSession {
     private(set) var error: String?
     private(set) var asShotTemperature: Float?
     private(set) var asShotTint: Float?
+    /// Bumped whenever a lens thumbnail has been written to the cache.
+    private(set) var thumbnailVersion = 0
     /// What the last fusion run did (nil until one has finished).
     private(set) var fusionReport: FusionReport?
     /// Telephoto details of the last run, when it was a full fusion.
@@ -99,9 +101,37 @@ final class ShotSession {
             lenses = file.images.sorted { $0.camera.rawValue < $1.camera.rawValue }
             canFuseFull = TeleFusion.canFuse(file)
             selectedLens = file.metadata.referenceCamera ?? lenses.first?.camera
+            buildLensThumbnails(file: file)
         } catch {
             self.error = "Couldn't read \(url.lastPathComponent): \(error)"
             isWorking = false
+        }
+    }
+
+    /// Fills the lens strip. The file is already parsed here, so each
+    /// thumbnail costs one small render; asking the shared thumbnailer
+    /// instead would re-read and re-parse the whole file once per lens.
+    private func buildLensThumbnails(file: LRIFile) {
+        let shot = Shot(id: shotID, path: url.path, capturedAt: Date(), fileSize: 0)
+        let adjustments = adjustments
+        let lenses = lenses
+        Task(priority: .utility) { [weak self] in
+            for lens in lenses {
+                guard let self else { return }
+                if await Thumbnailer.shared.cached(for: shot, lens: lens.camera.label) != nil { continue }
+                var renderer = self.renderers[lens.camera]
+                if renderer == nil {
+                    renderer = try? await Task.detached(priority: .utility) { try LensRenderer(image: lens, file: file) }.value
+                    if let renderer, self.renderers[lens.camera] == nil { self.renderers[lens.camera] = renderer }
+                    renderer = self.renderers[lens.camera]
+                }
+                guard let renderer else { continue }
+                if let image = try? await Task.detached(priority: .utility, operation: { try renderer.render(adjustments, maxDimension: 320) }).value {
+                    Thumbnailer.shared.store(image, for: self.shotID, lens: lens.camera.label)
+                    self.thumbnailVersion += 1
+                }
+            }
+            self?.thumbnailVersion += 1
         }
     }
 

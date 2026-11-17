@@ -117,7 +117,8 @@ struct LensStrip: View {
                     LensTile(
                         shot: model.library.shot(session.shotID),
                         lens: lens,
-                        isSelected: !session.showsFused && lens.camera == session.selectedLens
+                        isSelected: !session.showsFused && lens.camera == session.selectedLens,
+                        version: session.thumbnailVersion
                     )
                     .onTapGesture {
                         session.selectedLens = lens.camera
@@ -137,6 +138,8 @@ struct LensTile: View {
     let shot: Shot?
     let lens: RawImage
     let isSelected: Bool
+    /// Changes as the session writes thumbnails; triggers a cache lookup.
+    let version: Int
     @State private var thumbnail: CGImage?
 
     var body: some View {
@@ -161,9 +164,9 @@ struct LensTile: View {
                 .foregroundStyle(isSelected ? Theme.accent : .secondary)
         }
         .contentShape(Rectangle())
-        .task(id: lens.camera) {
-            guard let shot else { return }
-            thumbnail = await Thumbnailer.shared.thumbnail(for: shot, lens: lens.camera.label, maxDimension: 320)
+        .task(id: version) {
+            guard let shot, thumbnail == nil else { return }
+            thumbnail = await Thumbnailer.shared.cached(for: shot, lens: lens.camera.label)
         }
     }
 }
