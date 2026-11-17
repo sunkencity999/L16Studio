@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/panel</item>
+        <item name="android:colorPrimaryDark">@color/canvas</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/canvas</item>
+        <item name="android:statusBarColor">@color/canvas</item>
+        <item name="android:navigationBarColor">@color/canvas</item>
+        <item name="android:textColorPrimary">@color/text</item>
+    </style>
+    <style name="AppTheme.Fullscreen" parent="AppTheme">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
