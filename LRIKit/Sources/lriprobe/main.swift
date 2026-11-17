@@ -88,6 +88,14 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
         print("orientation: \(file.metadata.orientation.map(String.init(describing:)) ?? "?")")
         print("image gain: \(file.metadata.imageGain.map { String($0) } ?? "?")  integration: \(file.metadata.imageIntegrationTime.map { String($0) } ?? "?") s")
         print("capture time: \(file.metadata.captureTime.map { "\($0)" } ?? "?")  model: \(file.metadata.deviceModel ?? "?")  flash: \(file.metadata.flashFired.map(String.init) ?? "?")  altitude: \(file.metadata.altitude.map { String($0) } ?? "?")")
+        if CommandLine.arguments.contains("--geometry") {
+            for g in file.geometry {
+                let k = g.intrinsics, r = g.rotation
+                print(String(format: "geometry %@ focus %.0f: fx %.1f fy %.1f cx %.1f cy %.1f | t (%.2f, %.2f, %.2f) | R [%.4f %.4f %.4f; %.4f %.4f %.4f; %.4f %.4f %.4f]",
+                             g.camera.label, g.focusDistance, k.0, k.4, k.2, k.5, g.translation.x, g.translation.y, g.translation.z,
+                             r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8))
+            }
+        }
         print("on tripod: \(file.metadata.onTripod.map(String.init) ?? "?")")
         let lat = file.metadata.latitude
         let lon = file.metadata.longitude
@@ -175,6 +183,28 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
             if let dest = CGImageDestinationCreateWithURL(jpegURL as CFURL, "public.jpeg" as CFString, 1, nil) {
                 CGImageDestinationAddImage(dest, fused, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
                 CGImageDestinationFinalize(dest)
+            }
+            if let depth = report.depth {
+                let base = outURL.deletingPathExtension().path
+                DepthDebug.write(depth, to: base + "_depth.png")
+                print(String(format: "depth map %d x %d, measured over %.0f%% of the frame; centre is %@ away",
+                             depth.width, depth.height, depth.measured * 100,
+                             depth.distance(atX: 0.5, y: 0.5).map { String(format: "%.2f m", $0) } ?? "too far to tell"))
+                if let spec = CommandLine.arguments.first(where: { $0.hasPrefix("--refocus=") }) {
+                    let parts = spec.dropFirst(10).split(separator: ",").compactMap { Double($0) }
+                    if parts.count >= 2 {
+                        let settings = RefocusSettings(focusX: parts[0], focusY: parts[1], aperture: parts.count > 2 ? Float(parts[2]) : 18)
+                        let began = Date()
+                        if let blurred = Refocus.apply(settings, to: fused, depth: depth),
+                           let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: base + "_refocus.jpg") as CFURL, "public.jpeg" as CFString, 1, nil) {
+                            CGImageDestinationAddImage(dest, blurred, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+                            CGImageDestinationFinalize(dest)
+                            print(String(format: "refocused at (%.2f, %.2f), %@ away, aperture %.0f mm, in %.1f s", parts[0], parts[1],
+                                         depth.distance(atX: parts[0], y: parts[1]).map { String(format: "%.2f m", $0) } ?? "far",
+                                         settings.aperture, Date().timeIntervalSince(began)))
+                        }
+                    }
+                }
             }
             print("fused \(report.frames.count + 1) lenses onto \(report.reference.label) in \(String(format: "%.1f", report.seconds)) s -> \(outURL.lastPathComponent)")
             for f in report.frames {

@@ -50,6 +50,18 @@ final class ShotSession {
     private(set) var canFuseFull = false
     /// True when the shot has a frame from the monochrome lens.
     private(set) var canFuseMono = false
+    /// Distances measured during the last merge, when the file allows it.
+    private(set) var depth: DepthMap?
+    /// Background blur works on the merges made on a single lens's grid.
+    var canRefocus: Bool { depth != nil && effectiveFusionMode != .full }
+
+    /// Moves the point that stays sharp (fractions of the picture's size).
+    func setFocus(x: Double, y: Double) {
+        guard showsFused, canRefocus, var refocus = adjustments.refocus else { return }
+        refocus.focusX = min(1, max(0, x))
+        refocus.focusY = min(1, max(0, y))
+        adjustments.refocus = refocus
+    }
     /// The mode actually in effect (full needs telephoto frames).
     var effectiveFusionMode: FusionMode {
         switch fusionMode {
@@ -242,6 +254,7 @@ final class ShotSession {
     /// slider movement to stop first, and a superseded run is discarded.
     private func renderFused(file: LRIFile, generation myGeneration: Int) {
         let look = adjustments.look
+        let refocus = adjustments.refocus
         // The merge depends only on the raw development; the look is applied
         // to its result.
         let development = adjustments.withoutLook
@@ -288,18 +301,20 @@ final class ShotSession {
                     self.fused = (float, development, mode)
                     self.fusionReport = report
                     self.teleReport = tele
+                    self.depth = report.depth
                     merged = float
                 }
 
+                let depth = mode == .full ? nil : self.depth
                 let display = try await Task.detached(priority: .userInitiated) {
-                    try Self.displayImage(from: Self.finished(merged, look: look))
+                    try Self.displayImage(from: Self.finished(merged, look: look, refocus: refocus, depth: depth))
                 }.value
                 guard self.generation == myGeneration else { return }
                 self.image = display
                 self.isFullResolution = true
                 self.isWorking = false
                 self.progressText = nil
-                if development.isIdentity, look == nil, mode != .mono, let small = try? Self.displayImage(from: merged, maxDimension: 320) {
+                if development.isIdentity, look == nil, refocus == nil, mode != .mono, let small = try? Self.displayImage(from: merged, maxDimension: 320) {
                     Thumbnailer.shared.store(small, for: self.shotID, lens: "FUSED")
                 }
             } catch is CancellationError {
@@ -314,8 +329,14 @@ final class ShotSession {
     }
 
     /// The merged image with the look applied (or as it is, with no look).
-    private nonisolated static func finished(_ merged: CGImage, look: LookSettings?) -> CGImage {
-        guard let look, let styled = LookRenderer.apply(look, to: merged) else { return merged }
+    private nonisolated static func finished(_ merged: CGImage, look: LookSettings?, refocus: RefocusSettings?, depth: DepthMap?) -> CGImage {
+        var image = merged
+        // Blur first, so the look's sharpening doesn't re-crisp what was blurred.
+        if let refocus, let depth, depth.width * depth.scale == merged.width,
+           let blurred = Refocus.apply(refocus, to: merged, depth: depth) {
+            image = blurred
+        }
+        guard let look, let styled = LookRenderer.apply(look, to: image) else { return image }
         return styled
     }
 
@@ -390,9 +411,11 @@ final class ShotSession {
     func exportFused(as format: ExportFormat, to destination: URL) async throws {
         guard let file else { return }
         let look = adjustments.look
+        let refocus = adjustments.refocus
         let development = adjustments.withoutLook
         let mode = effectiveFusionMode
         let cached = (fused?.adjustments == development && fused?.mode == mode) ? fused?.image : nil
+        let cachedDepth = depth
         try await Task.detached(priority: .userInitiated) {
             if format == .dng {
                 // Merged again without the tone curve, so the file holds
@@ -405,16 +428,20 @@ final class ShotSession {
                 return
             }
             let merged: CGImage
+            var depth: DepthMap?
             if let cached {
                 merged = cached
+                depth = mode == .full ? nil : cachedDepth
             } else if mode == .full {
                 merged = try TeleFusion.fuse(file: file, adjustments: development).image
             } else {
-                merged = try WideFusion.fuse(file: file, adjustments: development, monochrome: mode == .mono).image
+                let result = try WideFusion.fuse(file: file, adjustments: development, monochrome: mode == .mono)
+                merged = result.image
+                depth = result.report.depth
             }
             // Either merge covers the wide lenses' field of view.
             let details = file.metadata.imageProperties(focalLength35: 28)
-            try Self.write(Self.finished(merged, look: look), as: format, to: destination, details: details)
+            try Self.write(Self.finished(merged, look: look, refocus: refocus, depth: depth), as: format, to: destination, details: details)
         }.value
     }
 

@@ -28,6 +28,9 @@ public struct FusionReport: Sendable {
     public let reference: CameraID
     public let frames: [Frame]
     public let seconds: Double
+    /// Distances measured from the lenses' parallax, when the file carries
+    /// the factory geometry needed to work them out.
+    public var depth: DepthMap?
 }
 
 /// Stage one of lens fusion: merge every colour lens that shares the
@@ -86,6 +89,7 @@ public enum WideFusion {
         let ref = try LensRenderer(image: mono, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
         let refLuma = ref.alignmentLuma()
         var merger = DetailMerger(reference: ref)
+        var observations: [DepthEstimator.Observation] = []
         var frames: [FusionReport.Frame] = []
         for (index, lens) in others.enumerated() {
             progress?("Aligning \(lens.camera.label)", Double(index + 1) / steps)
@@ -95,6 +99,11 @@ public enum WideFusion {
             let grey = source.luma()
             source = RGBPlanes(r: grey, g: grey, b: grey)
             let field = TileAligner.align(reference: refLuma, target: source.alignmentLuma()).smoothed()
+            if let geometry = file.geometry.first(where: { $0.camera == lens.camera }) {
+                observations.append(DepthEstimator.Observation(
+                    geometry: geometry, field: field,
+                    luma: source.alignmentLuma().downsampled(by: DepthEstimator.mapScale)))
+            }
             var (warped, valid) = field.warp(source)
             let trust = field.reliability(width: valid.width, height: valid.height)
             for i in 0..<valid.data.count { valid.data[i] *= trust.data[i] }
@@ -109,7 +118,10 @@ public enum WideFusion {
         progress?("Merging", (steps - 1) / steps)
         let merged = merger.result()
         let grey = merged.luma()
-        let report = FusionReport(reference: mono.camera, frames: frames, seconds: Date().timeIntervalSince(start))
+        var report = FusionReport(reference: mono.camera, frames: frames, seconds: Date().timeIntervalSince(start))
+        if let geometry = file.geometry.first(where: { $0.camera == mono.camera }) {
+            report.depth = DepthEstimator.estimate(observations: observations, reference: geometry, guide: refLuma)
+        }
         return (RGBPlanes(r: grey, g: grey, b: grey), report)
     }
 
@@ -143,12 +155,18 @@ public enum WideFusion {
         let ref = try LensRenderer(image: reference, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
         let refLuma = ref.alignmentLuma()
         var merger = DetailMerger(reference: ref)
+        var observations: [DepthEstimator.Observation] = []
 
         var frames: [FusionReport.Frame] = []
         for (index, lens) in others.enumerated() {
             progress?("Aligning \(lens.camera.label)", Double(index + 1) / steps)
             let source = try LensRenderer(image: lens, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
             let field = TileAligner.align(reference: refLuma, target: source.alignmentLuma()).smoothed()
+            if let geometry = file.geometry.first(where: { $0.camera == lens.camera }) {
+                observations.append(DepthEstimator.Observation(
+                    geometry: geometry, field: field,
+                    luma: source.alignmentLuma().downsampled(by: DepthEstimator.mapScale)))
+            }
             var (warped, valid) = field.warp(source)
             let trust = field.reliability(width: valid.width, height: valid.height)
             for i in 0..<valid.data.count { valid.data[i] *= trust.data[i] }
@@ -156,6 +174,11 @@ public enum WideFusion {
             // matching scales each channel to the reference's local colour,
             // and it then adds detail only, so it can't desaturate anything.
             let coverage = merger.add(&warped, valid: valid, detailOnly: lens.cfaPattern == nil)
+            if let folder = ProcessInfo.processInfo.environment["L16_FUSION_DUMP"] {
+                let grid = field.reliabilityGrid()
+                let text = "{\"tile\":\(field.tile),\"cols\":\(field.cols),\"rows\":\(field.rows),\"dx\":\(field.dx),\"dy\":\(field.dy),\"rel\":\(grid.data)}"
+                try? text.write(toFile: "\(folder)/field_\(lens.camera.label).json", atomically: true, encoding: .utf8)
+            }
 
             let magnitudes = zip(field.dx, field.dy).map { ($0 * $0 + $1 * $1).squareRoot() }.sorted()
             frames.append(.init(
@@ -167,7 +190,10 @@ public enum WideFusion {
         }
 
         progress?("Merging", (steps - 1) / steps)
-        let report = FusionReport(reference: reference.camera, frames: frames, seconds: Date().timeIntervalSince(start))
+        var report = FusionReport(reference: reference.camera, frames: frames, seconds: Date().timeIntervalSince(start))
+        if let geometry = file.geometry.first(where: { $0.camera == reference.camera }) {
+            report.depth = DepthEstimator.estimate(observations: observations, reference: geometry, guide: refLuma)
+        }
         return (merger.result(), report)
     }
 }

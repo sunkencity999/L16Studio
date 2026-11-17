@@ -39,10 +39,27 @@ public struct CaptureTime: Sendable, Hashable {
     public var rawZoneOffset: Int?
 }
 
+/// Where one module sits and how it projects, from the factory calibration
+/// stored in every file. `rotation` and `translation` take a point in the
+/// camera's common frame (millimetres) into this module's own frame;
+/// `intrinsics` then projects it to pixels on the full sensor.
+public struct ModuleGeometry: Sendable {
+    public let camera: CameraID
+    /// The focus distance (millimetres) this calibration entry was made at.
+    public let focusDistance: Float
+    public let intrinsics: Matrix3x3
+    public let rotation: Matrix3x3
+    public let translation: (x: Float, y: Float, z: Float)
+}
+
 public struct LRIFile: Sendable {
     public let images: [RawImage]
     public let cameraInfos: [CameraInfo]
     public let metadata: ShotMetadata
+    /// Factory geometry for the modules with a fixed line of sight (the wide
+    /// ones and those with glued mirrors; the movable-mirror modules are
+    /// calibrated differently and are not included).
+    public var geometry: [ModuleGeometry] = []
 
     public var referenceImage: RawImage? {
         guard let ref = metadata.referenceCamera else { return nil }
@@ -59,11 +76,12 @@ public struct LRIFile: Sendable {
         var colors: [ColorInfo] = []
         var cameraInfos: [CameraInfo] = []
         var metadata = ShotMetadata()
+        var geometry: [ModuleGeometry] = []
 
         var remaining = data
         while !remaining.isEmpty {
             let (block, length) = try LRIBlock.parse(from: remaining)
-            try extract(from: block, images: &images, colors: &colors, cameraInfos: &cameraInfos, metadata: &metadata)
+            try extract(from: block, images: &images, colors: &colors, cameraInfos: &cameraInfos, metadata: &metadata, geometry: &geometry)
             remaining = remaining.subdata(in: (remaining.startIndex + length)..<remaining.endIndex)
         }
 
@@ -77,7 +95,7 @@ public struct LRIFile: Sendable {
             images[i].color = colors.filter { $0.camera == images[i].camera }
         }
 
-        return LRIFile(images: images, cameraInfos: cameraInfos, metadata: metadata)
+        return LRIFile(images: images, cameraInfos: cameraInfos, metadata: metadata, geometry: geometry)
     }
 
     private static func extract(
@@ -85,7 +103,8 @@ public struct LRIFile: Sendable {
         images: inout [RawImage],
         colors: inout [ColorInfo],
         cameraInfos: inout [CameraInfo],
-        metadata: inout ShotMetadata
+        metadata: inout ShotMetadata,
+        geometry: inout [ModuleGeometry]
     ) throws {
         switch block.type {
         case .gpsData:
@@ -128,6 +147,20 @@ public struct LRIFile: Sendable {
 
         for moduleCal in header.moduleCalibration {
             let camera = CameraID(moduleCal.cameraID)
+            if moduleCal.hasGeometry {
+                // Intrinsics and extrinsics come in separate entries: the
+                // projection at two focus distances, then the placement.
+                let bundles = moduleCal.geometry.perFocusCalibration
+                if let k = bundles.first(where: { $0.hasIntrinsics }),
+                   let e = bundles.first(where: { $0.hasExtrinsics && $0.extrinsics.hasCanonical }) {
+                    let c = e.extrinsics.canonical
+                    geometry.append(ModuleGeometry(
+                        camera: camera, focusDistance: k.focusDistance,
+                        intrinsics: matrix3x3(k.intrinsics.kMat),
+                        rotation: matrix3x3(c.rotation),
+                        translation: (c.translation.x, c.translation.y, c.translation.z)))
+                }
+            }
             for color in moduleCal.color {
                 // Rust reference: skip entries with no forward matrix, since
                 // that's the one we actually need to do anything useful.

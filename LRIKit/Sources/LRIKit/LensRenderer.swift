@@ -15,12 +15,15 @@ public struct RenderAdjustments: Sendable, Hashable, Codable {
     /// The finishing look (Auto, Vivid, ...), applied after the raw
     /// development; `nil` leaves the developed image as it is.
     public var look: LookSettings?
+    /// Background blur by distance, for merged pictures; `nil` is off.
+    public var refocus: RefocusSettings?
 
-    public init(exposure: Float = 0, temperature: Float? = nil, tint: Float? = nil, look: LookSettings? = nil) {
+    public init(exposure: Float = 0, temperature: Float? = nil, tint: Float? = nil, look: LookSettings? = nil, refocus: RefocusSettings? = nil) {
         self.exposure = exposure
         self.temperature = temperature
         self.tint = tint
         self.look = look
+        self.refocus = refocus
     }
 
     /// The raw-development part only. Fusion merges developed frames and
@@ -28,6 +31,7 @@ public struct RenderAdjustments: Sendable, Hashable, Codable {
     public var withoutLook: RenderAdjustments {
         var copy = self
         copy.look = nil
+        copy.refocus = nil
         return copy
     }
 

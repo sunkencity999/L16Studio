@@ -621,3 +621,49 @@ this and the auto-import test.
   when the shot has a monochrome frame, and it exports like the other
   merges. The picker and export were built but not clicked through.
 - `lriprobe --fuse --mono`.
+
+### Depth from parallax, and background blur (2026-11-17)
+
+**Geometry.** Every file carries factory calibration per module: intrinsics
+at two focus distances and, for the wide and glued-mirror modules, rotation
+and translation relative to A1 (`LRIFile.geometry`). The A modules sit
+24-43 mm from A1, fx about 3375 px. Checked against the merge's alignment
+fields: with the image in the calibration's own orientation (no flips), the
+shift of each lens runs along its predicted baseline (median off-axis error
+1-6 px) and on a close subject the lenses agree on distance to 1-2%. On a
+far scene they disagree by 20-35% until a constant per-lens correction of a
+few pixels is fitted (calibration drift); that fit is part of the solve,
+with its shared component removed so scale stays tied to calibration.
+
+**Depth map** (`DepthEstimator`, 1/8 scale, inverse millimetres):
+1. Tile fields -> per-lens corrections and the range of distances present.
+2. Dense search: for each cell and candidate distance, sample every other
+   lens where geometry says the point would be; cost is the difference in
+   local contrast, averaged over the better half of the lenses.
+3. Confidence = clear winner x texture x not blown out; unconfident cells
+   are filled from confident ones of similar tone.
+A first version built only from the tile fields measured 34% of the keyboard
+shot and guessed half the keyboard wrong (the tile aligner fails on shifts of
+300-500 px). The dense search measures 67% and gets the whole keyboard as one
+receding surface, 0.2-1 m, which matches the scene.
+
+**Background blur** (`Refocus`): blur circle = focal length x aperture x
+difference in inverse distance; seven blur levels, each built only from
+pixels that are themselves about that blurry so a sharp subject doesn't
+smear into what is behind it. 0.4 s at 13 MP.
+
+**What it looks like.** Keyboard shot, focus on the middle rows, 18 mm:
+convincing, with the keyboard sharp in a band and smooth fall-off both
+ways. Office shot (2-7 m, blank green walls, blown ceiling): the near chair
+blurs correctly, but there are still patches of wrong distance on walls and
+ceiling.
+
+**Limits.** Wide and mono merges only (the full merge has a different
+canvas). Depth edges are only as fine as the 1/8-scale map. Nothing is done
+about hair-like detail. In the app (Depth section: switch, aperture slider,
+click to focus, blur in exports) the controls were built but not clicked
+through: capturing the app window did not work in this session.
+
+`lriprobe --fuse --refocus=x,y[,aperture]` writes `_depth.png` and
+`_refocus.jpg`; `--geometry` prints the calibration; `L16_FUSION_DUMP=dir`
+writes the tile fields.

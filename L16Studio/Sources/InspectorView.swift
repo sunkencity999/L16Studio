@@ -14,6 +14,7 @@ struct InspectorView: View {
                     ShotInfoSection(shot: shot)
                     if session.showsFused {
                         FusionInfoSection(session: session)
+                        DepthSection(session: session)
                     } else if let lens = session.selectedImage {
                         LensInfoSection(lens: lens)
                     }
@@ -432,6 +433,63 @@ struct ExportSection: View {
                 model.library.lastError = "Export failed: \(error)"
             }
             isExporting = false
+        }
+    }
+}
+
+/// Background blur by distance: the shallow depth of field of a large lens,
+/// applied afterwards from the distances the merge measured.
+struct DepthSection: View {
+    @Bindable var session: ShotSession
+
+    var body: some View {
+        if session.depth != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader(title: "Depth")
+                if session.canRefocus {
+                    Toggle("Background blur", isOn: Binding(
+                        get: { session.adjustments.refocus != nil },
+                        set: { session.adjustments.refocus = $0 ? RefocusSettings() : nil }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    if let refocus = session.adjustments.refocus, let depth = session.depth {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("Aperture").font(.callout)
+                                Spacer()
+                                Text(String(format: "%.0f mm", refocus.aperture))
+                                    .font(.callout.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(value: Binding(
+                                get: { refocus.aperture },
+                                set: { value in
+                                    var next = refocus
+                                    next.aperture = value
+                                    session.adjustments.refocus = next
+                                }
+                            ), in: 2...40)
+                            .controlSize(.small)
+                        }
+                        InfoRow(label: "Focus at", value: depth.distance(atX: refocus.focusX, y: refocus.focusY)
+                            .map { $0 < 10 ? String(format: "%.2f m", $0) : String(format: "%.0f m", $0) } ?? "far away")
+                        Text("Click the picture to choose what stays sharp. A wider aperture blurs the rest more.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("Distances come from the small differences in view between the wide lenses. They are best on close, detailed subjects; plain walls and far scenes can come out patchy.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Background blur is available in the Wide and Mono lens merges.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 }

@@ -85,7 +85,9 @@ struct ViewerView: View {
                     nominalSize: session.showsFused
                         ? CGSize(width: image.width, height: image.height)
                         : CGSize(width: lens.width, height: lens.height),
-                    fitToken: session.showsFused ? session.fusedToken : lens.camera.rawValue
+                    fitToken: session.showsFused ? session.fusedToken : lens.camera.rawValue,
+                    onClick: session.showsFused && session.canRefocus && session.adjustments.refocus != nil
+                        ? { point in session.setFocus(x: point.x, y: point.y) } : nil
                 )
             } else {
                 ProgressView(session.showsFused ? (session.progressText ?? "Fusing…") : "Developing…")
@@ -223,10 +225,27 @@ struct ZoomableImageView: NSViewRepresentable {
     let nominalSize: CGSize
     /// Changing this refits the image to the window (a different lens or shot).
     let fitToken: Int
+    /// Called with a single click's position as fractions of the picture
+    /// (from the top left). Used to choose the focus point.
+    var onClick: ((CGPoint) -> Void)? = nil
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, NSGestureRecognizerDelegate {
         var fitToken: Int?
         weak var scrollView: NSScrollView?
+        var onClick: ((CGPoint) -> Void)?
+        weak var doubleClick: NSGestureRecognizer?
+
+        @objc func click(_ recognizer: NSClickGestureRecognizer) {
+            guard let onClick, let view = recognizer.view, view.bounds.width > 0, view.bounds.height > 0 else { return }
+            let point = recognizer.location(in: view)
+            let fromTop = view.isFlipped ? point.y : view.bounds.height - point.y
+            onClick(CGPoint(x: point.x / view.bounds.width, y: fromTop / view.bounds.height))
+        }
+
+        /// A single click waits to see that it isn't the start of a double click.
+        func gestureRecognizer(_ recognizer: NSGestureRecognizer, shouldRequireFailureOf other: NSGestureRecognizer) -> Bool {
+            other === doubleClick && recognizer !== doubleClick
+        }
 
         @objc func toggleZoom(_ recognizer: NSClickGestureRecognizer) {
             guard let scrollView, let document = scrollView.documentView else { return }
@@ -261,12 +280,19 @@ struct ZoomableImageView: NSViewRepresentable {
         let doubleClick = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.toggleZoom(_:)))
         doubleClick.numberOfClicksRequired = 2
         imageView.addGestureRecognizer(doubleClick)
+        let click = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.click(_:)))
+        click.numberOfClicksRequired = 1
+        click.delegate = context.coordinator
+        imageView.addGestureRecognizer(click)
+        context.coordinator.doubleClick = doubleClick
+        context.coordinator.onClick = onClick
         context.coordinator.scrollView = scrollView
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let imageView = scrollView.documentView as? NSImageView else { return }
+        context.coordinator.onClick = onClick
         // Lay the document out in points so 100% zoom is one image pixel per screen pixel.
         let scale = scrollView.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         // A rotated shot swaps the nominal sides; trust the rendered image's aspect.

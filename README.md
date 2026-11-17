@@ -49,6 +49,13 @@ below) but not a port of any existing project's source.
   shutter, waits for the camera to finish writing the shot, brings it into
   the library and opens it. The transfer runs at USB 2 speed, so a shot
   takes about half a minute to arrive.
+- **Depth and background blur**: the wide lenses sit 24 to 43 mm apart, so
+  each sees the scene from a slightly different place. Using the factory
+  geometry stored in every shot, the merge works out how far away each part
+  of the picture is. Switch on "Background blur" in the Depth section,
+  click what should stay sharp, and set an imagined aperture: everything
+  nearer or farther blurs as it would through a large lens. Best on close,
+  detailed subjects; plain walls and far scenes can come out patchy.
 - **True black and white**: a "Mono lens" merge built on the camera's
   monochrome module, which has no colour filter. Every pixel is a real
   measurement and it gathers more light, so the result is visibly cleaner
@@ -65,8 +72,8 @@ below) but not a port of any existing project's source.
   focal length, lens, and the location when the camera had one), so they
   sort and search properly in Photos, Lightroom and the like.
 
-**Not yet**: depth effects (refocusing, background blur), and reliable
-telephoto detail at close range. Nobody in the L16 community has reproduced
+**Not yet**: reliable telephoto detail at close range, and background blur
+on the full-detail (telephoto) merge. Nobody in the L16 community has reproduced
 Light's full fusion pipeline; this project is building its own in stages.
 
 ## Requirements
