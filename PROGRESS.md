@@ -383,3 +383,41 @@ instructions is what worked on this unit).
 The APK is signed with `camera-app/dev.keystore` (gitignored, generated on
 first build, password in `build.sh`). It only exists on the build machine;
 losing it means later versions cannot update earlier installs in place.
+
+## Dead power button: Screen off and lift to wake (2026-11-16)
+
+On the development camera the power button (the small one beside the shutter)
+sends nothing: `qpnp_kpdpwr_status` in `/proc/interrupts` stays at 0 through
+repeated presses and across a reboot, and `getevent` shows no `KEY_POWER`.
+An injected `input keyevent KEYCODE_POWER` sleeps and wakes the camera, so the
+fault is below Android. Probably hardware; possibly older than this project.
+
+Things learned about the L16's controls while chasing it:
+- Physical keys: shutter half press (`KEY_CAMERA_FOCUS`, gpio `cam_focus`),
+  shutter full press (key 766 -> CAMERA, gpio `cam_snapshot`), power
+  (`qpnp_pon` KEY_POWER). The PMIC RESIN line ("volume down" to the
+  bootloader) fires together with the full shutter press.
+- The "volume" area is `elan-touchscreen`, a 768 x 1 touch strip: Light's
+  zoom slider.
+- `getevent` takes one device at most; with none it reads them all.
+
+`camera-app` 0.2.0 works around it:
+- `SleepActivity` ("Screen off" launcher entry + gallery button) calls
+  `DevicePolicyManager.lockNow()`. The app is a device admin with only
+  `force-lock`. The user must approve Android's prompt; granting it with
+  `dpm set-active-admin` over adb was (rightly) not allowed here.
+- `WakeService` (foreground, restarted on boot while the admin is active)
+  registers the wake-up tilt detector (type 22, hidden constant at API 23)
+  and wake-up proximity sensor while the screen is off, and turns the screen
+  on with a `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` lock on a tilt
+  (unless covered) or on being uncovered. 1.5 s settle time after screen off.
+- Nothing wakes the stock camera otherwise except USB power: the shutter keys
+  are not wake keys, and `double_tap_to_wake=1` in settings has no effect.
+
+Verified: screen off works (user confirmed); with the screen off both sensors
+show as active for `WakeService` in `dumpsys sensorservice`. Not yet verified
+at the time of writing: that tilting or uncovering actually wakes it.
+
+A stronger fix would make the shutter half press a wake key via a key-layout
+override in `/data/system/devices/keylayout/` (`key 528 FOCUS WAKE`), which
+needs root for one boot; not done.

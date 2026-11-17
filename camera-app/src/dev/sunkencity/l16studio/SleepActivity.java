@@ -13,7 +13,8 @@ import android.widget.Toast;
  *
  * It exists for cameras whose power button no longer works: it shows up in
  * the app list as "Screen off", and the gallery has a button that does the
- * same. It has no screen of its own; it acts and closes.
+ * same. It has no screen of its own; it acts and closes. Waking is handled
+ * by {@link WakeService} (lift to wake), which this always starts first.
  *
  * The first time, Android asks the user to allow the app to lock the screen.
  * Starting it with the extra "deactivate" set to true gives that permission
@@ -34,6 +35,8 @@ public class SleepActivity extends Activity {
         ComponentName admin = new ComponentName(context, AdminReceiver.class);
         if (policy == null) return;
         if (policy.isAdminActive(admin)) {
+            // Never put the camera to sleep without a way to wake it.
+            WakeService.start(context);
             policy.lockNow();
             return;
         }
@@ -53,6 +56,7 @@ public class SleepActivity extends Activity {
             DevicePolicyManager policy = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
             ComponentName admin = new ComponentName(this, AdminReceiver.class);
             if (policy != null && policy.isAdminActive(admin)) policy.removeActiveAdmin(admin);
+            WakeService.stop(this);
         } else {
             sleep(this);
         }

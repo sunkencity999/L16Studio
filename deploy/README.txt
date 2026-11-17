@@ -8,10 +8,11 @@ This package puts the L16 Studio app on a Light L16. The app adds:
     sliders, saving a copy next to the shot
   - Wi-Fi transfer of shots to L16Studio on a Mac, or to any web browser
   - a button to Light's own camera app, which still takes the pictures
-  - "Screen off": a button, and a second icon in the app list, that put the
-    camera to sleep, for cameras whose power button has worn out. The camera
-    asks you to allow this the first time; it is the only special permission
-    the app uses, and the uninstaller gives it back.
+  - "Screen off" and lift to wake, for cameras whose power button has worn
+    out: a button, and a second icon in the app list, put the camera to
+    sleep, and picking it up or uncovering it wakes it. The camera asks you
+    to allow the screen-off part the first time; it is the only special
+    permission the app uses, and the uninstaller gives it back.
 
 It is one ordinary Android app. The camera's own software is not changed,
 nothing is rooted or flashed, and it can be removed again at any time.

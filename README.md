@@ -111,11 +111,12 @@ is an Android 6 device underneath):
   without a cable. It is read-only, unauthenticated and only runs while
   switched on, so use it on a network you trust.
 - A button to jump to Light's own camera app, which still does the shooting.
-- **Screen off**: a button in the gallery, and a second icon in the app list,
-  that put the camera to sleep. This is for cameras whose power button no
-  longer works. Android asks you to allow it the first time (the app
-  registers as a device administrator with one permission, locking the
-  screen).
+- **Screen off and lift to wake**, for cameras whose power button no longer
+  works. A button in the gallery, and a second icon in the app list, put the
+  camera to sleep; picking it up or uncovering it wakes it again (using the
+  tilt and proximity sensors, which work while it sleeps). Android asks you
+  to allow the screen-off part the first time (the app registers as a device
+  administrator with one permission, locking the screen).
 
 ### Installing it on a camera
 
