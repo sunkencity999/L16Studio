@@ -547,7 +547,10 @@ the half charge Light asks for.
 - Two cameras number their shots alike. Auto-import puts a clashing name in
   a "Camera <id>" subfolder. The manual import sheet does not: importing
   L16_00001 from a second camera there would replace the first camera's
-  file of that name. Still to fix.
+  file of that name. Fixed straight after: a same-name file of a different
+  size is kept and the new one goes into "Camera 2" (not exercised with a
+  real clash; raw sizes differ between the two cameras seen so far, but two
+  shots of equal size and name would still be treated as the same file).
 - The finder now drops a camera when its advertisement goes away.
 - Left as found after the test: the camera's Wi-Fi transfer off, the Mac's
   switch off. The test shot (L16_00032) is still on the second camera and
