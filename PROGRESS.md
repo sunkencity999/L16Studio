@@ -462,3 +462,15 @@ needs root for one boot; not done.
 - The camera did not power off when unplugged (uptime was continuous, and
   the battery reads healthy: 100%, 4,269 mAh full charge). The cold-start
   test of the power button therefore hasn't happened yet.
+- **Lift to wake made more sensitive** (0.2.2). The owner confirmed it works
+  unplugged but needed "a fair bit" of wiggling: the tilt detector wants a
+  35-degree change held for two seconds. `WakeService` now also registers the
+  wake-up accelerometer (100 ms samples, delivered in 600 ms batches so the
+  processor can doze between them) and wakes on a turn of more than 12
+  degrees from the resting gravity vector, or on two consecutive readings
+  more than 1.3 m/s^2 away from 1 g. Covered proximity still suppresses
+  everything and moves the resting reference along. Each wake logs its
+  reason under the `L16Wake` logcat tag. Verified over adb: the sensor is
+  registered while asleep and the camera does not wake itself lying still.
+  Not yet known: how it feels in the hand, false wakes when carried
+  uncovered, and the standby battery cost of the batched accelerometer.
