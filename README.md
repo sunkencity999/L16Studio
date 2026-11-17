@@ -36,6 +36,12 @@ below) but not a port of any existing project's source.
   image, and are the same looks as the on-camera editor.
 - **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
   as JPEG, HEIC or 16-bit TIFF.
+- **Automatic import over Wi-Fi**: a switch in the sidebar. While it is on
+  and the camera has Wi-Fi transfer running on the same network, each shot
+  arrives in the library a few seconds after it is taken. The first time a
+  camera is seen, the shots already on it are left alone (use Import for
+  those); after that anything new is fetched, including shots taken while
+  the camera was away.
 - **Real capture details**: the library is ordered by when each shot was
   taken, read from the camera's own record in the raw file, and exports
   carry it as standard metadata (date and time zone, exposure, sensitivity,

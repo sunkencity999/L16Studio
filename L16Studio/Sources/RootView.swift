@@ -86,6 +86,7 @@ struct SidebarView: View {
                     Label("Import from L16…", systemImage: "cable.connector")
                 }
                 .buttonStyle(.plain)
+                AutoSyncRow(sync: model.autoSync)
             }
         }
         .listStyle(.sidebar)
@@ -115,5 +116,30 @@ struct SidebarView: View {
         Label(title, systemImage: symbol)
             .badge(model.library.count(for: filter))
             .tag(filter)
+    }
+}
+
+/// The switch for automatic import over Wi-Fi, with what it is doing.
+struct AutoSyncRow: View {
+    @Bindable var sync: AutoSync
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $sync.isEnabled) {
+                Label("Auto-import over Wi-Fi", systemImage: "wifi")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            if sync.isEnabled, !sync.status.isEmpty {
+                HStack(spacing: 6) {
+                    if sync.isBusy { ProgressView().controlSize(.mini) }
+                    Text(sync.status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .help("While this is on, shots you take arrive in the library by themselves whenever the camera has Wi-Fi transfer switched on and is on this network.")
     }
 }

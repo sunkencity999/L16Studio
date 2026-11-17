@@ -531,3 +531,24 @@ the half charge Light asks for.
   from All apps, Back on the home screen does nothing. Not yet checked:
   choosing it in Android's home-screen prompt and living with it across a
   restart.
+
+### Automatic import over Wi-Fi (2026-11-17)
+
+- First real test of the wireless path, with the second camera and the Mac
+  on the same network: the listing answers at the camera's address, Bonjour
+  discovery finds "Light L16", and a download completes at full size.
+- `AutoSync` (Mac) polls a discovered camera every 12 s. It keeps a record
+  per camera (`autoSyncKnownShots` in the app's defaults, keyed by the `id`
+  the camera app now reports: the last six characters of its serial). First
+  meeting records what is there and downloads nothing; later passes fetch
+  whatever is not in the record. Checked: 31 existing shots recorded and
+  none fetched, then a shot taken on the camera was in the library within
+  about ten seconds with the right capture time.
+- Two cameras number their shots alike. Auto-import puts a clashing name in
+  a "Camera <id>" subfolder. The manual import sheet does not: importing
+  L16_00001 from a second camera there would replace the first camera's
+  file of that name. Still to fix.
+- The finder now drops a camera when its advertisement goes away.
+- Left as found after the test: the camera's Wi-Fi transfer off, the Mac's
+  switch off. The test shot (L16_00032) is still on the second camera and
+  in the Mac library.

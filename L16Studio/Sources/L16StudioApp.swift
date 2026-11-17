@@ -8,6 +8,7 @@ import LRIKit
 @Observable
 final class AppModel {
     let library = LibraryStore()
+    @ObservationIgnored private(set) lazy var autoSync = AutoSync(library: library)
     private(set) var session: ShotSession?
     var showInspector = true
     var showCameraImport = false

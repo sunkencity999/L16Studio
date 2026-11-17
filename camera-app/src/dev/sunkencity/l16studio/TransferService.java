@@ -280,7 +280,12 @@ public class TransferService extends Service {
 
     private static String json() {
         List<Shots.Shot> shots = Shots.list();
-        StringBuilder sb = new StringBuilder("{\"camera\":\"Light L16\",\"shots\":[");
+        // "id" tells one camera from another (the Mac's automatic import
+        // keeps a record per camera): the tail of the serial number.
+        String serial = String.valueOf(android.os.Build.SERIAL);
+        String id = serial.length() > 6 ? serial.substring(serial.length() - 6) : serial;
+        StringBuilder sb = new StringBuilder("{\"camera\":\"Light L16\",\"id\":\"")
+                .append(id.replaceAll("[^A-Za-z0-9]", "")).append("\",\"shots\":[");
         for (int i = 0; i < shots.size(); i++) {
             Shots.Shot s = shots.get(i);
             if (i > 0) sb.append(',');

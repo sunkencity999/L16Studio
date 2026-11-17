@@ -144,9 +144,27 @@ enum CameraLink {
             let rawSize: Int64
         }
         let shots: [Entry]
+        /// Which camera this is (app 0.3.0 and later).
+        let id: String?
+    }
+
+    /// The shots a camera offers over Wi-Fi, and which camera it is.
+    struct WiFiCamera {
+        /// The camera's own id, or its address for app versions before 0.3.0.
+        let id: String
+        let files: [RemoteFile]
+    }
+
+    static func wifiCamera(at address: String) async throws -> WiFiCamera {
+        let (id, files) = try await fetchOverWiFi(address)
+        return WiFiCamera(id: id ?? address, files: files)
     }
 
     private static func listOverWiFi(_ address: String) async throws -> [RemoteFile] {
+        try await fetchOverWiFi(address).1
+    }
+
+    private static func fetchOverWiFi(_ address: String) async throws -> (String?, [RemoteFile]) {
         guard let base = baseURL(address) else { throw Failure.failed("Enter the address shown on the camera.") }
         do {
             let (data, response) = try await session.data(from: base.appendingPathComponent("api/shots"))
@@ -154,12 +172,13 @@ enum CameraLink {
                 throw Failure.failed("The camera at \(address) didn't answer as expected.")
             }
             let listing = try JSONDecoder().decode(WiFiListing.self, from: data)
-            return listing.shots.enumerated().compactMap { index, entry in
+            let files = listing.shots.enumerated().compactMap { index, entry -> RemoteFile? in
                 guard entry.rawSize > 0 else { return nil } // preview only: nothing to import
                 return RemoteFile(
                     id: index, name: entry.name + ".lri", size: entry.rawSize,
                     url: base.appendingPathComponent("raw/\(entry.name).lri"))
             }.sorted { $0.name < $1.name }
+            return (listing.id, files)
         } catch let failure as Failure {
             throw failure
         } catch {
@@ -259,15 +278,33 @@ final class WiFiCameraFinder: NSObject, NetServiceBrowserDelegate, NetServiceDel
 
     @ObservationIgnored private let browser = NetServiceBrowser()
     @ObservationIgnored private var resolving: [NetService] = []
+    /// Service name -> address, so a camera that stops advertising is dropped.
+    @ObservationIgnored private var byName: [String: String] = [:]
+    @ObservationIgnored private var started = false
 
     func start() {
+        guard !started else { return }
+        started = true
         browser.delegate = self
         browser.searchForServices(ofType: "_l16studio._tcp.", inDomain: "local.")
     }
 
     func stop() {
         browser.stop()
+        started = false
         resolving.removeAll()
+        byName.removeAll()
+        addresses.removeAll()
+    }
+
+    nonisolated func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
+        let name = service.name
+        Task { @MainActor in
+            resolving.removeAll { $0.name == name }
+            if let address = byName.removeValue(forKey: name) {
+                addresses.removeAll { $0 == address }
+            }
+        }
     }
 
     nonisolated func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
@@ -279,10 +316,11 @@ final class WiFiCameraFinder: NSObject, NetServiceBrowserDelegate, NetServiceDel
     }
 
     nonisolated func netServiceDidResolveAddress(_ sender: NetService) {
-        let host = sender.hostName, port = sender.port
+        let host = sender.hostName, port = sender.port, name = sender.name
         Task { @MainActor in
             guard let host, port > 0 else { return }
             let address = "\(host.trimmingCharacters(in: CharacterSet(charactersIn: "."))):\(port)"
+            byName[name] = address
             if !addresses.contains(address) { addresses.append(address) }
         }
     }
