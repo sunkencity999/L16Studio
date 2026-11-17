@@ -110,8 +110,16 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
         if CommandLine.arguments.contains("--fuse-tele") {
             // Full fusion: wide merge plus telephoto detail, at the shot's focal length.
             let scale = CommandLine.arguments.first { $0.hasPrefix("--scale=") }.flatMap { Float($0.dropFirst(8)) }
-            let (merged, report) = try TeleFusion.fuse(file: file, scale: scale) { message, fraction in
+            let asDNG = CommandLine.arguments.contains("--dng")
+            let (merged, report) = try TeleFusion.fuse(file: file, scale: scale, sceneLinear: asDNG) { message, fraction in
                 print(String(format: "  fuse %3.0f%%  %@", fraction * 100, message))
+            }
+            if asDNG {
+                let out = url.deletingLastPathComponent()
+                    .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_fused_tele.dng")
+                let data = try DNGWriter.writeLinear(image: merged, metadata: file.metadata)
+                try data.write(to: out)
+                print("wrote \(out.lastPathComponent) (\(data.count / 1_000_000) MB)")
             }
             let lookName = CommandLine.arguments.first { $0.hasPrefix("--look=") }.map { String($0.dropFirst(7)) }
             var fused = merged
@@ -134,6 +142,20 @@ for path in arguments.dropFirst() where !path.hasPrefix("--") {
             for t in report.tiles {
                 print(String(format: "  tele %@: at (%.0f, %.0f) in the wide frame, match %.2f, alignment trusted in %.0f%% of its footprint, detail over %.0f%% of the output",
                              t.camera.label, t.origin.x, t.origin.y, t.placementScore, t.aligned * 100, t.coverage * 100))
+            }
+            continue
+        }
+
+        if CommandLine.arguments.contains("--fuse-dng") {
+            // The wide merge, without a tone curve, as a linear raw DNG.
+            let (fused, report) = try WideFusion.fuse(file: file, sceneLinear: true)
+            let out = url.deletingLastPathComponent()
+                .appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)_fused.dng")
+            let data = try DNGWriter.writeLinear(image: fused, metadata: file.metadata)
+            try data.write(to: out)
+            print("wrote \(out.lastPathComponent) (\(data.count / 1_000_000) MB) in \(String(format: "%.1f", report.seconds)) s")
+            for f in report.frames {
+                print(String(format: "  %@: accepted over %.0f%% of the frame", f.camera.label, f.coverage * 100))
             }
             continue
         }

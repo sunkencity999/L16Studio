@@ -72,6 +72,7 @@ public enum TeleFusion {
         file: LRIFile,
         adjustments: RenderAdjustments = .none,
         scale requestedScale: Float? = nil,
+        sceneLinear: Bool = false,
         progress: WideFusion.Progress? = nil
     ) throws -> (image: CGImage, report: TeleFusionReport) {
         let start = Date()
@@ -80,7 +81,7 @@ public enum TeleFusion {
         let scale = min(plan.magnification, max(1, requestedScale ?? plan.magnification))
 
         // Stage one: the merged wide image, on the reference lens's grid.
-        let (wide, wideReport) = try WideFusion.fusePlanes(file: file, adjustments: adjustments) { message, fraction in
+        let (wide, wideReport) = try WideFusion.fusePlanes(file: file, adjustments: adjustments, sceneLinear: sceneLinear) { message, fraction in
             progress?(message, fraction * 0.25)
         }
         let wideLuma = wide.alignmentLuma()
@@ -103,7 +104,7 @@ public enum TeleFusion {
         for (index, lens) in plan.tele.enumerated() {
             let fraction = 0.25 + 0.7 * Double(index) / Double(plan.tele.count)
             progress?("Placing \(lens.camera.label)", fraction)
-            let source = try LensRenderer(image: lens, file: file).renderLinear(adjustments)
+            let source = try LensRenderer(image: lens, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
             let teleLuma = source.alignmentLuma()
 
             // 1. Where in the wide frame does this telephoto frame sit?

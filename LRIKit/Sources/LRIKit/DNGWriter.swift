@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// EXIF/TIFF LightSource codes DNG reuses for CalibrationIlluminant1/2.
 /// The CIE fluorescent standards (F2/F7/F11) have no exact EXIF code; these
@@ -197,5 +198,87 @@ extension RawImage {
         guard let c = color.first(where: { $0.whitepoint == whitepoint }) ?? color.first,
               c.rgRatio > 0, c.bgRatio > 0 else { return nil }
         return (c.rgRatio, 1, c.bgRatio)
+    }
+}
+
+extension DNGWriter {
+    /// Stops of headroom kept above nominal white in `writeLinear`.
+    private static let linearHeadroomEV: Float = 2
+
+    /// Writes a merged picture as a "linear raw" DNG: three 16-bit samples
+    /// per pixel, already demosaiced but otherwise untouched, with the
+    /// colour description a raw converter needs. It opens in Lightroom,
+    /// Capture One, Photos and the like with the full editing range, unlike
+    /// a JPEG or TIFF whose tone curve is already baked in.
+    ///
+    /// `image` must be 32-bit float RGBA in linear Display P3, as the fusion
+    /// functions return it, and should have been merged with `sceneLinear`
+    /// so no tone curve is applied twice. Values above nominal white are
+    /// kept, up to two stops; `BaselineExposure` tells the reader where
+    /// nominal white is.
+    public static func writeLinear(image: CGImage, metadata: ShotMetadata? = nil) throws -> Data {
+        let w = image.width, h = image.height
+        guard image.bitsPerComponent == 32, image.bitsPerPixel == 128,
+              image.bitmapInfo.contains(.floatComponents),
+              let source = image.dataProvider?.data as Data?,
+              source.count >= image.bytesPerRow * (h - 1) + w * 16 else {
+            throw DNGWriterError.sampleCountMismatch(expected: w * h * 4, got: 0)
+        }
+        let rowBytes = image.bytesPerRow
+        let gain = 65535 / powf(2, linearHeadroomEV)
+        var pixelData = Data(count: w * h * 6)
+        pixelData.withUnsafeMutableBytes { rawOut in
+            source.withUnsafeBytes { rawIn in
+                let out = rawOut.bindMemory(to: UInt16.self)
+                DispatchQueue.concurrentPerform(iterations: h) { y in
+                    let row = UnsafeRawBufferPointer(rebasing: rawIn[(y * rowBytes)..<(y * rowBytes + w * 16)])
+                        .bindMemory(to: Float.self)
+                    var o = y * w * 3
+                    for x in 0..<w {
+                        for c in 0..<3 {
+                            let v = row[x * 4 + c]
+                            out[o] = UInt16(max(0, min(65535, (v.isFinite ? v : 0) * gain + 0.5))).littleEndian
+                            o += 1
+                        }
+                    }
+                }
+            }
+        }
+
+        var tiff = TIFFWriter()
+        tiff.add(tag: 254, long: 0) // NewSubfileType
+        tiff.add(tag: 256, long: UInt32(w))
+        tiff.add(tag: 257, long: UInt32(h))
+        tiff.add(tag: 258, shorts: [16, 16, 16]) // BitsPerSample
+        tiff.add(tag: 259, short: 1) // Compression: none
+        tiff.add(tag: 262, short: 34892) // PhotometricInterpretation: LinearRaw
+        tiff.add(tag: 271, ascii: "Light")
+        tiff.add(tag: 272, ascii: metadata?.deviceModel ?? "L16")
+        tiff.add(tag: 273, long: 0) // StripOffsets (patched by build)
+        tiff.add(tag: 274, short: 1) // Orientation: the merge is already upright
+        tiff.add(tag: 277, short: 3) // SamplesPerPixel
+        tiff.add(tag: 278, long: UInt32(h)) // RowsPerStrip
+        tiff.add(tag: 279, long: UInt32(pixelData.count))
+        tiff.add(tag: 284, short: 1) // PlanarConfiguration: chunky
+        tiff.add(tag: 305, ascii: "L16 Studio")
+        if let time = metadata?.captureTime {
+            tiff.add(tag: 306, ascii: time.exifString)
+        }
+        tiff.add(tag: 50706, bytes: [1, 4, 0, 0]) // DNGVersion
+        tiff.add(tag: 50707, bytes: [1, 1, 0, 0]) // DNGBackwardVersion
+        tiff.add(tag: 50708, ascii: "Light L16 merged") // UniqueCameraModel
+        tiff.add(tag: 50714, shorts: [0, 0, 0]) // BlackLevel
+        tiff.add(tag: 50717, shorts: [65535, 65535, 65535]) // WhiteLevel
+        // The "camera" here is linear Display P3: this is XYZ (D65) -> P3.
+        tiff.add(tag: 50721, srationals: [
+            srational(2.4934969), srational(-0.9313836), srational(-0.4027108),
+            srational(-0.8294890), srational(1.7626641), srational(0.0236247),
+            srational(0.0358458), srational(-0.0761724), srational(0.9568845),
+        ])
+        tiff.add(tag: 50778, short: 21) // CalibrationIlluminant1: D65
+        tiff.add(tag: 50727, rationals: [(1, 1), (1, 1), (1, 1)]) // AnalogBalance
+        tiff.add(tag: 50728, rationals: [(1, 1), (1, 1), (1, 1)]) // AsShotNeutral: already balanced
+        tiff.add(tag: 50730, srationals: [srational(linearHeadroomEV)]) // BaselineExposure
+        return tiff.build(stripOffsetTag: 273, stripData: pixelData)
     }
 }

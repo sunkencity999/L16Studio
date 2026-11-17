@@ -336,10 +336,11 @@ final class ShotSession {
             case .tiff: .tiff
             }
         }
-        /// Single lenses export as JPEG/HEIC/DNG; the fused image has no raw
-        /// form, so it offers 16-bit TIFF instead of DNG.
+        /// Single lenses export as JPEG/HEIC/DNG. The fused image adds
+        /// 16-bit TIFF, and its DNG is a "linear raw" one: the merge itself,
+        /// with no tone curve or look, for editing in a raw converter.
         static let lensFormats: [ExportFormat] = [.jpeg, .heic, .dng]
-        static let fusedFormats: [ExportFormat] = [.jpeg, .heic, .tiff]
+        static let fusedFormats: [ExportFormat] = [.jpeg, .heic, .tiff, .dng]
     }
 
     /// Exports one lens. Runs off the main thread; throws on failure.
@@ -373,6 +374,16 @@ final class ShotSession {
         let mode = effectiveFusionMode
         let cached = (fused?.adjustments == development && fused?.mode == mode) ? fused?.image : nil
         try await Task.detached(priority: .userInitiated) {
+            if format == .dng {
+                // Merged again without the tone curve, so the file holds
+                // scene-linear data. The look is left out: it is the raw
+                // converter's job from here.
+                let linear = mode == .full
+                    ? try TeleFusion.fuse(file: file, adjustments: development, sceneLinear: true).image
+                    : try WideFusion.fuse(file: file, adjustments: development, sceneLinear: true).image
+                try DNGWriter.writeLinear(image: linear, metadata: file.metadata).write(to: destination, options: .atomic)
+                return
+            }
             let merged: CGImage
             if let cached {
                 merged = cached

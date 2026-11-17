@@ -182,12 +182,20 @@ public final class LensRenderer: @unchecked Sendable {
     }
 
     /// Full-resolution render as linear-light float planes, for fusion.
-    func renderLinear(_ adjustments: RenderAdjustments = .none) throws -> RGBPlanes {
+    ///
+    /// `sceneLinear` leaves out Core Image's tone curve ("boost"), so the
+    /// values stay proportional to the light that reached the sensor. That
+    /// is what a raw file should hold: the program that opens it applies
+    /// its own curve.
+    func renderLinear(_ adjustments: RenderAdjustments = .none, sceneLinear: Bool = false) throws -> RGBPlanes {
         lock.lock()
         defer { lock.unlock() }
         filter.isDraftModeEnabled = false
         filter.scaleFactor = 1
         apply(adjustments)
+        let boost = filter.boostAmount
+        if sceneLinear { filter.boostAmount = 0 }
+        defer { filter.boostAmount = boost }
         guard let output = filter.outputImage else { throw ImageRendererError.rawFilterProducedNoOutput }
         let extent = output.extent.integral
         let width = Int(extent.width), height = Int(extent.height)

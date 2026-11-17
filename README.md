@@ -35,7 +35,9 @@ below) but not a port of any existing project's source.
   with sliders to fine-tune. They apply to single lenses and to the fused
   image, and are the same looks as the on-camera editor.
 - **Export**: any lens, or all of them, as DNG, JPEG or HEIC; the fused image
-  as JPEG, HEIC or 16-bit TIFF.
+  as JPEG, HEIC, 16-bit TIFF or DNG. The merged DNG is a "linear raw"
+  file: the merge itself with no tone curve or look applied, so Lightroom,
+  Capture One or Photos open it with the editing range of a raw file.
 - **Automatic import over Wi-Fi**: a switch in the sidebar. While it is on
   and the camera has Wi-Fi transfer running on the same network, each shot
   arrives in the library a few seconds after it is taken. The first time a
@@ -103,7 +105,8 @@ Inside the app:
 - Double-click a shot to open it. Left/right arrows change lens, Esc returns
   to the library, double-click the image to switch between fit and 100%.
 - Adjustments, looks and export are in the inspector on the right (⌥⌘I).
-  Looks are baked into JPEG, HEIC and TIFF exports; DNG stays raw.
+  Looks are baked into JPEG, HEIC and TIFF exports; DNG stays raw (the
+  merged image's DNG too).
 
 Imported camera shots are stored in `~/Pictures/L16 Studio`. The library
 index lives in `~/Library/Application Support/L16Studio`.

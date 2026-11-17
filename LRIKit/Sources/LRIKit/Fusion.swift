@@ -48,9 +48,10 @@ public enum WideFusion {
     public static func fuse(
         file: LRIFile,
         adjustments: RenderAdjustments = .none,
+        sceneLinear: Bool = false,
         progress: Progress? = nil
     ) throws -> (image: CGImage, report: FusionReport) {
-        let (planes, report) = try fusePlanes(file: file, adjustments: adjustments, progress: progress)
+        let (planes, report) = try fusePlanes(file: file, adjustments: adjustments, sceneLinear: sceneLinear, progress: progress)
         guard let image = planes.makeCGImage() else { throw ImageRendererError.renderFailed }
         progress?("Done", 1)
         return (image, report)
@@ -59,6 +60,7 @@ public enum WideFusion {
     static func fusePlanes(
         file: LRIFile,
         adjustments: RenderAdjustments,
+        sceneLinear: Bool = false,
         progress: Progress?
     ) throws -> (planes: RGBPlanes, report: FusionReport) {
         let start = Date()
@@ -80,14 +82,14 @@ public enum WideFusion {
 
         let steps = Double(others.count + 2)
         progress?("Developing \(reference.camera.label)", 0)
-        let ref = try LensRenderer(image: reference, file: file).renderLinear(adjustments)
+        let ref = try LensRenderer(image: reference, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
         let refLuma = ref.alignmentLuma()
         var merger = DetailMerger(reference: ref)
 
         var frames: [FusionReport.Frame] = []
         for (index, lens) in others.enumerated() {
             progress?("Aligning \(lens.camera.label)", Double(index + 1) / steps)
-            let source = try LensRenderer(image: lens, file: file).renderLinear(adjustments)
+            let source = try LensRenderer(image: lens, file: file).renderLinear(adjustments, sceneLinear: sceneLinear)
             let field = TileAligner.align(reference: refLuma, target: source.alignmentLuma()).smoothed()
             var (warped, valid) = field.warp(source)
             let trust = field.reliability(width: valid.width, height: valid.height)

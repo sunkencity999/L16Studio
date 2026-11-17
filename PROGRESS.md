@@ -568,3 +568,20 @@ not capturable at the time). It cannot work over Wi-Fi: an ordinary app on
 the camera is not allowed to press keys. Two test shots (L16_00032 and
 L16_00033) are on the second camera and in the Mac library as a result of
 this and the auto-import test.
+
+### Merged image as a raw DNG (2026-11-17)
+
+- `renderLinear(sceneLinear: true)` sets `CIRAWFilter.boostAmount` to 0 for
+  the render, so the merge works on values without Core Image's tone curve.
+  Lens acceptance in both merges is within a few points of the normal run
+  (wide 25-36% vs 20-30% on shot 3; telephoto similar on shot 4), so the
+  alignment thresholds hold for the flatter data.
+- `DNGWriter.writeLinear` writes LinearRaw, 3 x 16-bit, ColorMatrix1 =
+  XYZ(D65) -> linear Display P3, neutral 1:1:1, two stops of headroom above
+  nominal white with BaselineExposure +2. Rendered back through ImageIO it
+  matches the normal merge in colour and brightness. Not yet opened in
+  Lightroom or Capture One.
+- Sizes: 77 MB for the 13 MP wide merge, 311 MB for the 52 MP full merge
+  (uncompressed). The full merge peaks at about 10 GB of memory, most of it
+  the merge itself.
+- `lriprobe --fuse-dng`, and `--fuse-tele --dng`.
